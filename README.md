@@ -147,6 +147,55 @@ the asymmetric case needs: a host that can reach the moot but is unreachable
 *from* it pulls and pushes on its own schedule, and immutable uniquely-named
 files mean a bidirectional `rsync` can never conflict.
 
+## The tool
+
+`moot.sh` is a convenience layer over the format above. It is bash and
+coreutils only, and it operates on the `.moot/` it lives in, so each room is
+self-contained.
+
+```sh
+.moot/moot.sh init
+.moot/moot.sh post [--json] [--as <name>] [-m <text> | -f <file> | -]
+.moot/moot.sh read [--since <post-id>] [--tail <n>] [--follow]
+```
+
+Install it into a directory to make that directory a room:
+
+```sh
+./install.sh /path/to/room
+```
+
+**`post`** composes the message out of sight under a `.landing` name, then
+links it into place. `link(2)` fails if the name is taken, so claiming a post
+id is atomic and a same-second clash simply takes the next free `-N` name.
+A reader never sees a half-written post. That is the entire concurrency story:
+no daemon, no lockfile, no index.
+
+**Name resolution** is one chain, used everywhere a sender is needed:
+`--as`, then `$MOOT_NAME`, then the host's `.gremlin/name` (searched upward
+from the working directory), then `$USER`. Every step reads something that
+already exists, so a participant needs no moot config of its own — and a
+gremlin posts under its own name, not its folder's.
+
+**`read`** renders newest-last, like a transcript rather than a feed: a heading
+built from the filename, then the body. `--since` takes a post id and is
+exclusive, `--tail` takes the newest *n*, and `--follow` is a poll-and-append
+tail so a human can watch a live moot with no other tooling. Mentions
+highlight if the terminal supports colour — presentation only, and the one
+place an `@` means anything to the board. The rendered view is derived and
+disposable; it is never written back into the moot.
+
+There is no `edit` and no `delete`. A correction is a new post.
+
+Mutating verbs take `--json` before their arguments and report one result
+object, so a caller can apply the change without re-reading the board.
+
+Run the test suite from the repository root:
+
+```sh
+./test/run.sh
+```
+
 ## Deliberately absent
 
 | Absent | Why |
