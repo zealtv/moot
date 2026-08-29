@@ -214,6 +214,125 @@ check 'a hand-written post is a post' "$("$room/.moot/moot.sh" read | grep -c 'p
 "$room/.moot/moot.sh" post --as tengu -m 'posted by tool' >/dev/null
 check 'a tool-written post is readable by hand' "$(cat "$room"/posts/*-tengu.md)" 'posted by tool'
 
+# ---------------------------------------------------------------- catchup
+
+group 'catchup'
+room=$(new_room)
+m() { "$room/.moot/moot.sh" "$@"; }
+say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
+
+say 20260829-100000-bob   'board is up'
+say 20260829-100100-bob   'hey @tengu can you look at the thing'
+say 20260829-100200-bob   'unrelated announcement'
+say 20260829-100300-bob   '@all standup moved'
+say 20260829-100400-bob   'nice work @fanta'
+
+out=$(m catchup --as tengu)
+check 'catchup delivers a direct mention' "$(printf '%s' "$out" | grep -c 'can you look at')" '1'
+check 'catchup delivers @all'             "$(printf '%s' "$out" | grep -c 'standup moved')" '1'
+check 'catchup skips an unmentioned post' "$(printf '%s' "$out" | grep -c 'unrelated')" '0'
+check 'catchup skips someone else atted'  "$(printf '%s' "$out" | grep -c 'nice work')" '0'
+check 'catchup writes the cursor' "$(cat "$room/seen/tengu")" '20260829-100400-bob'
+
+out=$(m catchup --as tengu)
+check 'a re-run delivers nothing'  "$(printf '%s' "$out" | grep -c 'can you look at')" '0'
+check 'the cursor did not move back' "$(cat "$room/seen/tengu")" '20260829-100400-bob'
+
+say 20260829-100500-bob '@tengu one more'
+out=$(m catchup --as tengu)
+check 'catchup resumes from the cursor' "$(printf '%s' "$out" | grep -c 'one more')" '1'
+check 'catchup does not re-deliver older mentions' "$(printf '%s' "$out" | grep -c 'can you look at')" '0'
+
+check 'the whole board is still readable' "$(m read | grep -c 'unrelated announcement')" '1'
+check 'catchup advanced past unmentioned posts' "$(cat "$room/seen/tengu")" '20260829-100500-bob'
+
+group 'catchup and nobody'
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
+say 20260829-100000-bob 'hello @nobodyatall'
+out=$(m catchup --as tengu)
+check 'a mention of nobody reaches nobody' "$(printf '%s' "$out" | grep -c 'hello')" '0'
+check 'a mention of nobody still advances the cursor' "$(cat "$room/seen/tengu")" '20260829-100000-bob'
+check 'the mistyped mention is visible on the board' "$(m read | grep -c '@nobodyatall')" '1'
+
+group 'mention matching'
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
+say 20260829-100000-bob 'thanks @tengu.'
+say 20260829-100100-bob 'ask @tengu, please'
+say 20260829-100200-bob 'not @tengulike'
+say 20260829-100300-bob 'an email a@tengu is not a mention of a'
+out=$(m catchup --as tengu)
+check 'a trailing full stop still mentions'   "$(printf '%s' "$out" | grep -c 'thanks')" '1'
+check 'a trailing comma still mentions'       "$(printf '%s' "$out" | grep -c 'please')" '1'
+check 'a longer name is a different name'     "$(printf '%s' "$out" | grep -c 'not @tengulike')" '0'
+
+group 'catchup --deliver'
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
+inbox="$work/inbox"; rm -rf "$inbox"
+say 20260829-100000-bob 'quiet announcement'
+say 20260829-100100-bob '@tengu please handle the thing bob raised earlier'
+m catchup --as tengu --deliver "$inbox" >/dev/null
+check '--deliver writes one file per mention' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
+delivered=$(ls "$inbox")
+case $delivered in *20260829-100100-bob*) ok 'a delivered filename carries the post id' ;; *) no 'a delivered filename carries the post id' "$delivered" ;; esac
+check '--deliver leaves no landing file' "$(ls -A "$inbox" | grep -c landing)" '0'
+body=$(cat "$inbox/$delivered")
+case $body in *"please handle the thing"*) ok 'a delivered item carries the body' ;; *) no 'a delivered item carries the body' ;; esac
+case $body in *"$room"*) ok 'a delivered item carries the path to the moot' ;; *) no 'a delivered item carries the path to the moot' ;; esac
+case $body in *'20260829-100100-bob'*) ok 'a delivered item carries its own post id' ;; *) no 'a delivered item carries its own post id' ;; esac
+case $body in *'read --tail'*) ok 'a delivered item says how to read backwards' ;; *) no 'a delivered item says how to read backwards' ;; esac
+check '--deliver delivers only mentions' "$(grep -rc 'quiet announcement' "$inbox" | grep -c ':1$')" '0'
+
+m catchup --as tengu --deliver "$inbox" >/dev/null
+check 'a re-run delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
+
+# Moot does not know what a nest is: gremlin integration is a path.
+rm -rf "$work/nest"; mkdir -p "$work/nest/in"
+rm -f "$room/seen/tengu"
+m catchup --as tengu --deliver "$work/nest/in" >/dev/null
+check '--deliver takes any directory the caller names' "$(ls "$work/nest/in" | wc -l | tr -d ' ')" '1'
+
+group 'catchup on a read-only moot'
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
+say 20260829-100000-bob '@tengu the board is read-only from here'
+inbox="$work/ro-inbox"; rm -rf "$inbox"; mkdir -p "$inbox"
+chmod -w "$room/seen"
+m catchup --as tengu --deliver "$inbox" >/dev/null 2>"$work/ro.err"
+check 'a read-only moot still delivers' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
+check 'a read-only moot warns about the cursor' "$(grep -c 'read-only moot' "$work/ro.err")" '1'
+m catchup --as tengu --deliver "$inbox" >/dev/null 2>&1
+check 'a read-only moot still delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
+chmod +w "$room/seen"
+
+group 'catchup name resolution and --json'
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
+mkdir -p "$room/.gremlin"; printf 'fanta\n' > "$room/.gremlin/name"
+say 20260829-100000-bob '@fanta over to you'
+( cd "$room" && MOOT_NAME= USER=username "$room/.moot/moot.sh" catchup >/dev/null )
+[ -f "$room/seen/fanta" ] && ok 'catchup uses the same name chain as post' || no 'catchup uses the same name chain as post'
+
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
+say 20260829-100000-bob '@tengu hi'
+out=$(m catchup --json --as tengu)
+case $out in *'"delivered":["20260829-100000-bob"]'*) ok 'catchup --json lists what it delivered' ;; *) no 'catchup --json lists what it delivered' "$out" ;; esac
+case $out in *'"since":null'*) ok 'catchup --json reports no prior cursor as null' ;; *) no 'catchup --json reports no prior cursor as null' "$out" ;; esac
+out=$(m catchup --json --as tengu)
+case $out in *'"changed":false'*'"delivered":[]'*) ok 'catchup --json reports an unchanged re-run' ;; *) no 'catchup --json reports an unchanged re-run' "$out" ;; esac
+
+group 'catchup on an empty board'
+room=$(new_room)
+"$room/.moot/moot.sh" catchup --as tengu >/dev/null 2>&1 && ok 'catchup on an empty board succeeds' || no 'catchup on an empty board succeeds'
+[ -e "$room/seen/tengu" ] && no 'an empty board writes no cursor' || ok 'an empty board writes no cursor'
+
+group 'catchup and attachments'
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }
+mkdir -p "$room/posts/20260829-100000-bob"
+printf '@tengu see the patch\n' > "$room/posts/20260829-100000-bob/post.md"
+printf 'diff\n' > "$room/posts/20260829-100000-bob/diff.patch"
+inbox="$work/att-inbox"; rm -rf "$inbox"
+m catchup --as tengu --deliver "$inbox" >/dev/null
+check 'an attachment post is delivered' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
+case $(cat "$inbox"/*) in *'diff.patch'*) ok 'a delivered attachment post points at its files' ;; *) no 'a delivered attachment post points at its files' ;; esac
+
 # ---------------------------------------------------------------- install
 
 group 'install'

@@ -36,6 +36,7 @@ moot — a directory of messages
   moot.sh init [--json]
   moot.sh post [--json] [--as <name>] [-m <text> | -f <file> | -]
   moot.sh read [--since <post-id>] [--tail <n>] [--follow]
+  moot.sh catchup [--json] [--as <name>] [--deliver <dir>]
 
 A post is <YYYYMMDD>-<HHMMSS>-<sender>.md in posts/, UTC, plain Markdown.
 Posts are immutable: there is no edit and no delete. A correction is a new post.
@@ -299,12 +300,159 @@ cmd_read() {
   done
 }
 
+# ---------------------------------------------------------------- catchup
+
+# The mentions in a post body, one per line, trailing sentence punctuation
+# trimmed. This is the only place the tool looks inside a post for meaning, and
+# it happens entirely reader-side: the board does not route, index, or validate
+# an @.
+mentions_in() {
+  [ -r "$1" ] || return 0
+  grep -oE '@[A-Za-z0-9._-]+' -- "$1" 2>/dev/null \
+    | sed -E 's/[._-]+$//' \
+    | sed -E 's/^@//' \
+    | sort -u
+}
+
+post_mentions_me() {
+  local body=$1 me=$2 m
+  while IFS= read -r m; do
+    [ "$m" = "$me" ] && return 0
+    [ "$m" = all ] && return 0
+  done < <(mentions_in "$body")
+  return 1
+}
+
+# A delivered item carries the path to the moot and its own post id, not just
+# the body. A cursor may have advanced silently past thirty announcements
+# before one asks for something, so the recipient needs to be able to read
+# backwards on demand — pull, not push. The board is right there.
+deliver_post() {
+  local id=$1 dir=$2 body out landing day time sender rest
+  day=${id%%-*}; rest=${id#*-}
+  time=${rest%%-*}; sender=${rest#*-}
+  body=$(post_body_path "$id")
+  out="$dir/moot-$id.md"
+
+  # The post id is in the filename, so a re-run delivers nothing twice even if
+  # the cursor could not be written.
+  [ -e "$out" ] && return 1
+
+  landing="$dir/.moot-$id.$$.landing"
+  {
+    printf '# moot mention · %s · %s-%s-%s %s:%s:%s UTC\n\n' \
+      "$sender" "${day:0:4}" "${day:4:2}" "${day:6:2}" \
+      "${time:0:2}" "${time:2:2}" "${time:4:2}"
+    printf -- '- moot: `%s`\n' "$room"
+    printf -- '- post: `%s`\n' "$id"
+    printf -- '- read back: `%s read --tail 20`\n\n' "$moot_dir/moot.sh"
+    printf -- '---\n\n'
+    if [ -r "$body" ]; then cat -- "$body"; else printf '(no post.md in posts/%s)\n' "$id"; fi
+    if [ -d "$posts_dir/$id" ]; then
+      local f names=()
+      for f in "$posts_dir/$id"/*; do
+        [ -e "$f" ] || continue
+        [ "${f##*/}" = post.md ] && continue
+        names+=("$posts_dir/$id/${f##*/}")
+      done
+      [ ${#names[@]} -gt 0 ] && printf '\nattached:\n%s\n' "$(printf -- '- `%s`\n' "${names[@]}")"
+    fi
+  } > "$landing"
+  mv -- "$landing" "$out"
+  return 0
+}
+
+cmd_catchup() {
+  local json=0 as= deliver= id
+
+  [ "${1:-}" = --json ] && { json=1; shift; }
+
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --as)      [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
+      --deliver) [ $# -ge 2 ] || die "--deliver needs a directory"; deliver=$2; shift 2 ;;
+      -h|--help) usage; return 0 ;;
+      *) die "unknown option for catchup: $1" ;;
+    esac
+  done
+
+  [ -d "$posts_dir" ] || die "no posts/ directory at $room (run: $0 init)"
+
+  local me; me=$(resolve_name "$as")
+  local cursor_file="$seen_dir/$me" cursor=
+  [ -r "$cursor_file" ] && cursor=$(head -n 1 -- "$cursor_file" | tr -d '[:space:]')
+
+  if [ -n "$deliver" ]; then
+    mkdir -p -- "$deliver" || die "cannot use deliver directory $deliver"
+    deliver=$(cd -- "$deliver" && pwd)
+  fi
+
+  local ids=() new=() delivered=() newest=
+  while IFS= read -r id; do ids+=("$id"); done < <(post_ids)
+  for id in ${ids[@]+"${ids[@]}"}; do
+    newest=$id
+    if [ -z "$cursor" ] || [ "$id" \> "$cursor" ]; then new+=("$id"); fi
+  done
+
+  [ "$json" = 1 ] || init_colour
+
+  for id in ${new[@]+"${new[@]}"}; do
+    # No mention: advance past it silently. Still readable with `read`,
+    # interrupts nobody.
+    post_mentions_me "$(post_body_path "$id")" "$me" || continue
+    if [ -n "$deliver" ]; then
+      deliver_post "$id" "$deliver" && delivered+=("$id")
+    else
+      delivered+=("$id")
+      [ "$json" = 1 ] || render_post "$id"
+    fi
+  done
+
+  # Advance the cursor past everything read, mentioned or not. One writer per
+  # path: only this participant ever writes seen/<its own name>, which is what
+  # keeps two divergent copies of the room reconciling as cleanly as posts do.
+  local cursor_written=0
+  if [ -n "$newest" ] && [ "$newest" != "$cursor" ]; then
+    if mkdir -p -- "$seen_dir" 2>/dev/null && printf '%s\n' "$newest" > "$cursor_file" 2>/dev/null; then
+      cursor_written=1
+    else
+      # A board reachable read-only is a normal way to run: delivery is still
+      # correct, because delivered filenames carry the post id.
+      printf 'moot: cannot write %s (read-only moot); nothing was delivered twice anyway\n' \
+        "seen/$me" >&2
+    fi
+  fi
+
+  if [ "$json" = 1 ]; then
+    local list= sep=
+    for id in ${delivered[@]+"${delivered[@]}"}; do
+      list="$list$sep\"$(json_escape "$id")\""; sep=,
+    done
+    printf '{"schema_version":1,"command":"catchup","ok":true,"changed":%s,"sender":"%s","since":%s,"cursor":%s,"cursor_written":%s,"scanned":%s,"delivered":[%s]}\n' \
+      "$([ ${#delivered[@]} -gt 0 ] || [ "$cursor_written" = 1 ] && echo true || echo false)" \
+      "$(json_escape "$me")" \
+      "$([ -n "$cursor" ] && printf '"%s"' "$(json_escape "$cursor")" || printf null)" \
+      "$([ -n "$newest" ] && printf '"%s"' "$(json_escape "$newest")" || printf null)" \
+      "$([ "$cursor_written" = 1 ] && echo true || echo false)" \
+      "${#new[@]}" "$list"
+  elif [ ${#delivered[@]} -gt 0 ]; then
+    if [ -n "$deliver" ]; then
+      printf 'delivered %s mention(s) to %s\n' "${#delivered[@]}" "$deliver"
+    else
+      printf '\n'
+    fi
+  elif [ -n "$deliver" ]; then
+    printf 'nothing for %s\n' "$me"
+  fi
+}
+
 # ---------------------------------------------------------------- dispatch
 
 case ${1:-help} in
   init) shift; cmd_init "$@" ;;
   post) shift; cmd_post "$@" ;;
   read) shift; cmd_read "$@" ;;
+  catchup) shift; cmd_catchup "$@" ;;
   help|-h|--help) usage ;;
   *) usage >&2; die "unknown command: $1" ;;
 esac
