@@ -389,12 +389,14 @@ m catchup --as tengu --deliver "$inbox" >/dev/null
 check '--deliver writes one file per mention' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 delivered=$(ls "$inbox")
 case $delivered in *20260829-100100-bob*) ok 'a delivered filename carries the post id' ;; *) no 'a delivered filename carries the post id' "$delivered" ;; esac
+case $delivered in moot-board-*) ok 'a delivered filename carries the room' ;; *) no 'a delivered filename carries the room' "$delivered" ;; esac
 check '--deliver leaves no landing file' "$(ls -A "$inbox" | grep -c landing)" '0'
 body=$(cat "$inbox/$delivered")
 case $body in *"please handle the thing"*) ok 'a delivered item carries the body' ;; *) no 'a delivered item carries the body' ;; esac
 case $body in *"$room"*) ok 'a delivered item carries the path to the moot' ;; *) no 'a delivered item carries the path to the moot' ;; esac
 case $body in *'20260829-100100-bob'*) ok 'a delivered item carries its own post id' ;; *) no 'a delivered item carries its own post id' ;; esac
-case $body in *'read --tail'*) ok 'a delivered item says how to read backwards' ;; *) no 'a delivered item says how to read backwards' ;; esac
+case $body in *'read --room board --tail'*) ok 'a delivered item says how to read backwards' ;; *) no 'a delivered item says how to read backwards' "$body" ;; esac
+case $body in *'- room: `board`'*) ok 'a delivered item names its room' ;; *) no 'a delivered item names its room' "$body" ;; esac
 check '--deliver delivers only mentions' "$(grep -rc 'quiet announcement' "$inbox" | grep -c ':1$')" '0'
 
 m catchup --as tengu --deliver "$inbox" >/dev/null
@@ -413,7 +415,7 @@ inbox="$work/ro-inbox"; rm -rf "$inbox"; mkdir -p "$inbox"
 chmod -w "$room/.moot/seen/board"
 m catchup --as tengu --deliver "$inbox" >/dev/null 2>"$work/ro.err"
 check 'a read-only moot still delivers' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
-check 'a read-only moot warns about the cursor' "$(grep -c 'read-only moot' "$work/ro.err")" '1'
+check 'a read-only moot warns about the cursor' "$(grep -c 'read-only room' "$work/ro.err")" '1'
 m catchup --as tengu --deliver "$inbox" >/dev/null 2>&1
 check 'a read-only moot still delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 chmod +w "$room/.moot/seen/board"
@@ -428,10 +430,69 @@ say 20260829-100000-bob '@fanta over to you'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
 say 20260829-100000-bob '@tengu hi'
 out=$(m catchup --json --as tengu)
-case $out in *'"delivered":["20260829-100000-bob"]'*) ok 'catchup --json lists what it delivered' ;; *) no 'catchup --json lists what it delivered' "$out" ;; esac
+case $out in *'"delivered":[{"room":"board","id":"20260829-100000-bob"}]'*) ok 'catchup --json names the room of what it delivered' ;; *) no 'catchup --json names the room of what it delivered' "$out" ;; esac
 case $out in *'"since":null'*) ok 'catchup --json reports no prior cursor as null' ;; *) no 'catchup --json reports no prior cursor as null' "$out" ;; esac
+case $out in *'"rooms":[{"room":"board"'*) ok 'catchup --json reports one entry per room swept' ;; *) no 'catchup --json reports one entry per room swept' "$out" ;; esac
 out=$(m catchup --json --as tengu)
 case $out in *'"changed":false'*'"delivered":[]'*) ok 'catchup --json reports an unchanged re-run' ;; *) no 'catchup --json reports an unchanged re-run' "$out" ;; esac
+
+group 'catchup sweeps every room'
+host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+for r in board release ops; do
+  j join "$r" >/dev/null
+  printf '@tengu the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-bob.md"
+done
+inbox="$work/sweep-inbox"; rm -rf "$inbox"
+out=$(j catchup --as tengu --deliver "$inbox")
+check 'one call delivers from every room' "$(ls "$inbox" | wc -l | tr -d ' ')" '3'
+check 'and says so on one line' "$(printf '%s' "$out" | wc -l | tr -d ' ')" '0'
+check 'the sweep advances every cursor' "$(ls "$host/.moot/seen"/*/tengu | wc -l | tr -d ' ')" '3'
+j catchup --as tengu --deliver "$inbox" >/dev/null
+check 'a re-run of the sweep delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '3'
+
+# Two rooms can produce the same post id in the same second from the same
+# sender. The filename is the whole duplicate-suppression mechanism.
+host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+j join board >/dev/null; j join release >/dev/null
+printf '@tengu same second, board\n' > "$host/.moot/rooms/board/posts/20260829-100000-bob.md"
+printf '@tengu same second, release\n' > "$host/.moot/rooms/release/posts/20260829-100000-bob.md"
+inbox="$work/clash-inbox"; rm -rf "$inbox"
+j catchup --as tengu --deliver "$inbox" >/dev/null
+check 'a same-second clash across rooms delivers both' "$(ls "$inbox" | wc -l | tr -d ' ')" '2'
+check 'and neither body was lost' "$(cat "$inbox"/* | grep -c 'same second,')" '2'
+
+group 'catchup --room narrows the sweep'
+host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+j join board >/dev/null; j join release >/dev/null
+printf '@tengu board\n' > "$host/.moot/rooms/board/posts/20260829-100000-bob.md"
+printf '@tengu release\n' > "$host/.moot/rooms/release/posts/20260829-100000-bob.md"
+inbox="$work/narrow-inbox"; rm -rf "$inbox"
+j catchup --as tengu --room board --deliver "$inbox" >/dev/null
+check '--room delivers from that room only' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
+[ -f "$host/.moot/seen/board/tengu" ] && ok '--room advances that cursor' || no '--room advances that cursor'
+[ -e "$host/.moot/seen/release/tengu" ] && no '--room leaves the other cursor alone' || ok '--room leaves the other cursor alone'
+j catchup --as tengu --room nosuch >/dev/null 2>&1 && no '--room on an unjoined room is an error' || ok '--room on an unjoined room is an error'
+
+group 'a read-only room does not stop the sweep'
+host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+for r in aa bb cc; do
+  j join "$r" >/dev/null
+  printf '@tengu the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-bob.md"
+done
+chmod -w "$host/.moot/seen/bb"
+inbox="$work/ro-sweep"; rm -rf "$inbox"
+j catchup --as tengu --deliver "$inbox" >/dev/null 2>"$work/ro-sweep.err"
+check 'the read-only room still delivered' "$(ls "$inbox" | wc -l | tr -d ' ')" '3'
+check 'and warned about its cursor' "$(grep -c 'read-only room' "$work/ro-sweep.err")" '1'
+[ -f "$host/.moot/seen/cc/tengu" ] && ok 'the room after it was still swept' || no 'the room after it was still swept'
+chmod +w "$host/.moot/seen/bb"
+
+group 'catchup with no rooms at all'
+host=$(new_host)
+"$host/.moot/moot.sh" catchup --as tengu >/dev/null 2>&1 && ok 'a host with no rooms exits clean' || no 'a host with no rooms exits clean'
+check 'and says nothing' "$("$host/.moot/moot.sh" catchup --as tengu 2>&1 | wc -c | tr -d ' ')" '0'
+out=$("$host/.moot/moot.sh" catchup --json --as tengu)
+case $out in *'"rooms":[]'*'"delivered":[]'*) ok 'and --json reports an empty sweep' ;; *) no 'and --json reports an empty sweep' "$out" ;; esac
 
 group 'catchup on an empty board'
 room=$(new_room)

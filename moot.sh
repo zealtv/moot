@@ -28,6 +28,11 @@ room=
 room_dir=
 posts_dir=
 
+# Accumulated across the rooms catchup sweeps, so one sweep reports once.
+sweep_delivered=()
+sweep_reports=()
+sweep_changed=0
+
 die() { printf 'moot: %s\n' "$*" >&2; exit 1; }
 
 json_escape() {
@@ -55,6 +60,9 @@ moot — a directory of messages
 A post is <YYYYMMDD>-<HHMMSS>-<sender>.md in rooms/<room>/posts/, UTC, plain
 Markdown. Posts are immutable: there is no edit and no delete. A correction is
 a new post.
+
+post and read are aimed at one room; catchup sweeps every room here unless
+--room narrows it.
 USAGE
 }
 
@@ -503,29 +511,33 @@ post_mentions_me() {
   return 1
 }
 
-# A delivered item carries the path to the room and its own post id, not just
-# the body. A cursor may have advanced silently past thirty announcements
-# before one asks for something, so the recipient needs to be able to read
-# backwards on demand — pull, not push. The board is right there.
+# A delivered item carries the room it came from, the path to it, and its own
+# post id, not just the body. A cursor may have advanced silently past thirty
+# announcements before one asks for something, so the recipient needs to be
+# able to read backwards on demand — pull, not push. The board is right there.
 deliver_post() {
   local id=$1 dir=$2 body out landing day time sender rest
   day=${id%%-*}; rest=${id#*-}
   time=${rest%%-*}; sender=${rest#*-}
   body=$(post_body_path "$id")
-  out="$dir/moot-$id.md"
+  # The room is in the filename as well as the id. Two rooms can produce the
+  # same id in the same second from the same sender, and the filename is the
+  # whole duplicate-suppression mechanism.
+  out="$dir/moot-$room-$id.md"
 
   # The post id is in the filename, so a re-run delivers nothing twice even if
   # the cursor could not be written.
   [ -e "$out" ] && return 1
 
-  landing="$dir/.moot-$id.$$.landing"
+  landing="$dir/.moot-$room-$id.$$.landing"
   {
-    printf '# moot mention · %s · %s-%s-%s %s:%s:%s UTC\n\n' \
-      "$sender" "${day:0:4}" "${day:4:2}" "${day:6:2}" \
+    printf '# moot mention · %s · %s · %s-%s-%s %s:%s:%s UTC\n\n' \
+      "$room" "$sender" "${day:0:4}" "${day:4:2}" "${day:6:2}" \
       "${time:0:2}" "${time:2:2}" "${time:4:2}"
+    printf -- '- room: `%s`\n' "$room"
     printf -- '- moot: `%s`\n' "$room_dir"
     printf -- '- post: `%s`\n' "$id"
-    printf -- '- read back: `%s read --tail 20`\n\n' "$moot_dir/moot.sh"
+    printf -- '- read back: `%s read --room %s --tail 20`\n\n' "$moot_dir/moot.sh" "$room"
     printf -- '---\n\n'
     if [ -r "$body" ]; then cat -- "$body"; else printf '(no post.md in posts/%s)\n' "$id"; fi
     if [ -d "$posts_dir/$id" ]; then
@@ -542,8 +554,69 @@ deliver_post() {
   return 0
 }
 
+# One room's worth of the sweep: deliver what mentions me, advance the cursor.
+# Appends to the sweep's accumulators rather than reporting, because the caller
+# reports once however many rooms it visited.
+catchup_room() {
+  local me=$1 deliver=$2 json=$3 id
+  local cursor_file="$seen_dir/$room/$me" cursor=
+  [ -r "$cursor_file" ] && cursor=$(head -n 1 -- "$cursor_file" | tr -d '[:space:]')
+
+  local ids=() new=() newest=
+  while IFS= read -r id; do ids+=("$id"); done < <(post_ids)
+  for id in ${ids[@]+"${ids[@]}"}; do
+    newest=$id
+    if [ -z "$cursor" ] || [ "$id" \> "$cursor" ]; then new+=("$id"); fi
+  done
+
+  local mine=0
+  for id in ${new[@]+"${new[@]}"}; do
+    # No mention: advance past it silently. Still readable with `read`,
+    # interrupts nobody.
+    post_mentions_me "$(post_body_path "$id")" "$me" || continue
+    if [ -n "$deliver" ]; then
+      deliver_post "$id" "$deliver" || continue
+    else
+      [ "$json" = 1 ] || render_post "$id"
+    fi
+    sweep_delivered+=("$room/$id")
+    mine=$((mine + 1))
+  done
+
+  # Advance the cursor past everything read, mentioned or not. The cursor is
+  # this participant's own state and never travels with the room, so two
+  # divergent copies reconcile on posts/ alone.
+  local cursor_written=0
+  if [ -n "$newest" ] && [ "$newest" != "$cursor" ]; then
+    if mkdir -p -- "$seen_dir/$room" 2>/dev/null && printf '%s\n' "$newest" > "$cursor_file" 2>/dev/null; then
+      cursor_written=1
+    else
+      # A room reachable read-only is a normal way to run: delivery is still
+      # correct, because delivered filenames carry the room and the post id.
+      # The sweep goes on to the next room — one read-only room must not stop
+      # the rooms after it.
+      printf 'moot: cannot write %s (read-only room); nothing was delivered twice anyway\n' \
+        ".moot/seen/$room/$me" >&2
+    fi
+  fi
+  [ "$cursor_written" = 1 ] && sweep_changed=1
+  [ "$mine" -gt 0 ] && sweep_changed=1
+
+  sweep_reports+=("$(printf '{"room":"%s","since":%s,"cursor":%s,"cursor_written":%s,"scanned":%s,"delivered":%s}' \
+    "$(json_escape "$room")" \
+    "$([ -n "$cursor" ] && printf '"%s"' "$(json_escape "$cursor")" || printf null)" \
+    "$([ -n "$newest" ] && printf '"%s"' "$(json_escape "$newest")" || printf null)" \
+    "$([ "$cursor_written" = 1 ] && echo true || echo false)" \
+    "${#new[@]}" "$mine")")
+  return 0
+}
+
+# catchup is the one verb that is not aimed. post and read say a thing or look
+# at a thing somewhere, so they resolve to a single room; catchup asks "is
+# there anything for me", and the answer spans everything subscribed. Hence no
+# --all flag: all is the default, and --room narrows.
 cmd_catchup() {
-  local json=0 as= room_opt= deliver= id
+  local json=0 as= room_opt= deliver= r
 
   [ "${1:-}" = --json ] && { json=1; shift; }
 
@@ -557,74 +630,60 @@ cmd_catchup() {
     esac
   done
 
-  use_room "$room_opt"
-  [ -d "$posts_dir" ] || die "no posts/ in room $room (run: $0 join $room)"
+  local rooms=()
+  if [ -n "$room_opt" ]; then
+    check_segment 'room name' "$room_opt"
+    [ -d "$rooms_dir/$room_opt" ] || die "no room $room_opt here (run: $0 join $room_opt)"
+    rooms=("$room_opt")
+  else
+    while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms)
+  fi
 
   local me; me=$(resolve_name "$as")
-  local cursor_file="$seen_dir/$room/$me" cursor=
-  [ -r "$cursor_file" ] && cursor=$(head -n 1 -- "$cursor_file" | tr -d '[:space:]')
 
   if [ -n "$deliver" ]; then
     mkdir -p -- "$deliver" || die "cannot use deliver directory $deliver"
     deliver=$(cd -- "$deliver" && pwd)
   fi
 
-  local ids=() new=() delivered=() newest=
-  while IFS= read -r id; do ids+=("$id"); done < <(post_ids)
-  for id in ${ids[@]+"${ids[@]}"}; do
-    newest=$id
-    if [ -z "$cursor" ] || [ "$id" \> "$cursor" ]; then new+=("$id"); fi
-  done
-
   [ "$json" = 1 ] || init_colour
 
-  for id in ${new[@]+"${new[@]}"}; do
-    # No mention: advance past it silently. Still readable with `read`,
-    # interrupts nobody.
-    post_mentions_me "$(post_body_path "$id")" "$me" || continue
-    if [ -n "$deliver" ]; then
-      deliver_post "$id" "$deliver" && delivered+=("$id")
-    else
-      delivered+=("$id")
-      [ "$json" = 1 ] || render_post "$id"
-    fi
+  sweep_delivered=()
+  sweep_reports=()
+  sweep_changed=0
+  for r in ${rooms[@]+"${rooms[@]}"}; do
+    use_room "$r"
+    [ -d "$posts_dir" ] || continue
+    catchup_room "$me" "$deliver" "$json"
   done
 
-  # Advance the cursor past everything read, mentioned or not. The cursor is
-  # this participant's own state and never travels with the room, so two
-  # divergent copies reconcile on posts/ alone.
-  local cursor_written=0
-  if [ -n "$newest" ] && [ "$newest" != "$cursor" ]; then
-    if mkdir -p -- "$seen_dir/$room" 2>/dev/null && printf '%s\n' "$newest" > "$cursor_file" 2>/dev/null; then
-      cursor_written=1
-    else
-      # A board reachable read-only is a normal way to run: delivery is still
-      # correct, because delivered filenames carry the post id.
-      printf 'moot: cannot write %s (read-only moot); nothing was delivered twice anyway\n' \
-        ".moot/seen/$room/$me" >&2
-    fi
-  fi
-
   if [ "$json" = 1 ]; then
-    local list= sep=
-    for id in ${delivered[@]+"${delivered[@]}"}; do
-      list="$list$sep\"$(json_escape "$id")\""; sep=,
+    # One command, one object. The sweep is a single question — "is there
+    # anything for me" — so it gets a single answer, and every delivered item
+    # names its room so a caller can act on it without parsing a filename.
+    local list= sep= item
+    for item in ${sweep_delivered[@]+"${sweep_delivered[@]}"}; do
+      list="$list$sep$(printf '{"room":"%s","id":"%s"}' \
+        "$(json_escape "${item%%/*}")" "$(json_escape "${item#*/}")")"
+      sep=,
     done
-    printf '{"schema_version":1,"command":"catchup","ok":true,"changed":%s,"room":"%s","sender":"%s","since":%s,"cursor":%s,"cursor_written":%s,"scanned":%s,"delivered":[%s]}\n' \
-      "$([ ${#delivered[@]} -gt 0 ] || [ "$cursor_written" = 1 ] && echo true || echo false)" \
-      "$(json_escape "$room")" \
-      "$(json_escape "$me")" \
-      "$([ -n "$cursor" ] && printf '"%s"' "$(json_escape "$cursor")" || printf null)" \
-      "$([ -n "$newest" ] && printf '"%s"' "$(json_escape "$newest")" || printf null)" \
-      "$([ "$cursor_written" = 1 ] && echo true || echo false)" \
-      "${#new[@]}" "$list"
-  elif [ ${#delivered[@]} -gt 0 ]; then
+    local reports= rsep= rep
+    for rep in ${sweep_reports[@]+"${sweep_reports[@]}"}; do
+      reports="$reports$rsep$rep"; rsep=,
+    done
+    printf '{"schema_version":2,"command":"catchup","ok":true,"changed":%s,"sender":"%s","rooms":[%s],"delivered":[%s]}\n' \
+      "$([ "$sweep_changed" = 1 ] && echo true || echo false)" \
+      "$(json_escape "$me")" "$reports" "$list"
+  elif [ ${#sweep_delivered[@]} -gt 0 ]; then
     if [ -n "$deliver" ]; then
-      printf 'delivered %s mention(s) to %s\n' "${#delivered[@]}" "$deliver"
+      # One heartbeat line however many rooms it swept.
+      printf 'delivered %s mention(s) to %s\n' "${#sweep_delivered[@]}" "$deliver"
     else
       printf '\n'
     fi
   elif [ -n "$deliver" ]; then
+    # Zero subscribed rooms is a normal state for a host that has installed
+    # moot and joined nothing, and a heartbeat must not spew.
     printf 'nothing for %s\n' "$me"
   fi
 }
