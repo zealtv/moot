@@ -52,6 +52,7 @@ moot — a directory of messages
 
   moot.sh init [--json] [--as <name>] [--room <name>]
   moot.sh join [--json] <room>
+  moot.sh subscribe [--json] <git-url> [<room>]
   moot.sh rooms
   moot.sh post [--json] [--as <name>] [--room <name>] [-m <text> | -f <file> | -]
   moot.sh read [--room <name>] [--since <post-id>] [--tail <n>] [--follow]
@@ -63,6 +64,9 @@ a new post.
 
 post and read are aimed at one room; catchup sweeps every room here unless
 --room narrows it.
+
+join makes a room here; subscribe clones one that already exists elsewhere,
+where rooms/<room>/ is the clone and its git remote is the room's address.
 USAGE
 }
 
@@ -306,6 +310,81 @@ cmd_rooms() {
     if [ "$r" = "$default" ]; then printf '* %s\n' "$r"; else printf '  %s\n' "$r"; fi
   done < <(subscribed_rooms)
   [ "$any" = 1 ] || printf 'no rooms here yet: %s join <room>\n' "$0"
+}
+
+# ---------------------------------------------------------------- subscribe
+
+# The room name a URL implies: the last path segment with any .git stripped.
+# Handles the scp-style git@host:board.git as well as a URL or a local path,
+# because all three end in the name and differ only in what precedes it.
+room_name_from_url() {
+  local url=$1 base
+  url=${url%/}
+  base=${url##*/}
+  base=${base##*:}
+  printf '%s' "${base%.git}"
+}
+
+# join creates a room; subscribe acquires one that already exists elsewhere.
+#
+# The clone *is* the room: the repository root is the room root, so posts/ sits
+# at the top of the repository and nothing else moot owns travels with it. That
+# is also why no file here records the URL — `git remote get-url origin` is
+# already the room's address, and a second copy could only drift from it.
+cmd_subscribe() {
+  local json=0 url= name= changed=0
+  [ "${1:-}" = --json ] && { json=1; shift; }
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -h|--help) usage; return 0 ;;
+      -*) die "unknown option for subscribe: $1" ;;
+      *)
+        if [ -z "$url" ]; then url=$1
+        elif [ -z "$name" ]; then name=$1
+        else die "subscribe takes a git url and an optional room name"; fi
+        shift ;;
+    esac
+  done
+  [ -n "$url" ] || die "subscribe needs a git url"
+
+  # The one verb in this tool with a hard dependency. It says so in moot's own
+  # voice rather than letting git's stderr surface from three frames down.
+  command -v git >/dev/null 2>&1 || die "subscribe needs git on PATH"
+
+  [ -n "$name" ] || name=$(room_name_from_url "$url")
+  [ -n "$name" ] || die "cannot derive a room name from '$url' (pass one: $0 subscribe <url> <room>)"
+  check_segment 'room name' "$name"
+
+  local dest="$rooms_dir/$name"
+  if [ -e "$dest" ]; then
+    die "room $name is already here (rooms/$name)"
+  fi
+
+  mkdir -p -- "$rooms_dir"
+  # --depth 1 because a room's history is its files, not its commits. A failed
+  # clone leaves nothing behind: a half-room would be indistinguishable from a
+  # subscribed one, since a room is subscribed by being a directory here.
+  if ! git clone --quiet --depth 1 -- "$url" "$dest" 2>/dev/null; then
+    rm -rf -- "$dest"
+    die "cannot clone $url"
+  fi
+  changed=1
+
+  # A remote that is still empty is the ordinary way this starts: make the
+  # repository somewhere, subscribe, post. Seed posts/ exactly as join does so
+  # the first post has somewhere to land; the first commit carries it over.
+  local posts="$dest/posts"
+  [ -d "$posts" ] || mkdir -p -- "$posts"
+  [ -e "$posts/.gitkeep" ] || : > "$posts/.gitkeep"
+  [ -d "$seen_dir/$name" ] || mkdir -p -- "$seen_dir/$name"
+
+  if [ "$json" = 1 ]; then
+    printf '{"schema_version":1,"command":"subscribe","ok":true,"changed":%s,"room":"%s","path":"%s","url":"%s"}\n' \
+      "$([ "$changed" = 1 ] && echo true || echo false)" \
+      "$(json_escape "$name")" "$(json_escape "rooms/$name")" "$(json_escape "$url")"
+  else
+    printf 'subscribed %s\n' "rooms/$name"
+  fi
 }
 
 # ---------------------------------------------------------------- post
@@ -687,6 +766,7 @@ cmd_catchup() {
 case ${1:-help} in
   init) shift; cmd_init "$@" ;;
   join) shift; cmd_join "$@" ;;
+  subscribe) shift; cmd_subscribe "$@" ;;
   rooms) shift; cmd_rooms "$@" ;;
   post) shift; cmd_post "$@" ;;
   read) shift; cmd_read "$@" ;;

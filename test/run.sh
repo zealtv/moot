@@ -113,6 +113,61 @@ check 'and says why' "$(j join 'bad room' 2>&1 >/dev/null | tail -1)" \
   "moot: room name 'bad room' is not filename-safe (use A-Z a-z 0-9 . _ -)"
 [ -e "$host/.moot/rooms/bad room" ] && no 'an unsafe room name writes no path' || ok 'an unsafe room name writes no path'
 
+# ---------------------------------------------------------------- subscribe
+
+# A room that already lives somewhere else. Every test here clones from a local
+# bare repository, so the suite stays bash and coreutils and never touches a
+# network.
+new_remote() {
+  local dir; dir=$(mktemp -d "$work/remote.XXXXXX")
+  git init -q --bare "$dir/board.git"
+  printf '%s' "$dir/board.git"
+}
+
+group 'subscribe'
+remote=$(new_remote)
+host=$(new_host); s() { "$host/.moot/moot.sh" "$@"; }
+out=$(s subscribe "$remote")
+check 'subscribe reports the room it made' "$out" 'subscribed rooms/board'
+check 'and the name came from the url' "$(s rooms | sed 's/^..//' | tr -d '\n')" 'board'
+check 'the room is the clone' "$(git -C "$host/.moot/rooms/board" remote get-url origin)" "$remote"
+check 'so the address needs no file of its own' "$(ls -A "$host/.moot" | grep -c '^remotes$')" '0'
+check 'and posts/ is ready before the remote has one' \
+  "$([ -e "$host/.moot/rooms/board/posts/.gitkeep" ] && echo yes)" 'yes'
+
+s post --as bob -m 'over git' >/dev/null
+check 'a subscribed room posts and reads like any other' "$(s read | grep -c 'over git')" '1'
+check 'and .git is not a post' "$(s read | grep -c '\.git')" '0'
+check 'the cursor is beside the room, not in it' \
+  "$([ -d "$host/.moot/seen/board" ] && echo yes)" 'yes'
+[ -e "$host/.moot/rooms/board/seen" ] && no 'nothing of mine lands inside the clone' || ok 'nothing of mine lands inside the clone'
+
+out=$(s subscribe "$remote" 2>&1 >/dev/null | tail -1)
+check 'subscribe refuses a room already here' "$out" 'moot: room board is already here (rooms/board)'
+s subscribe "$remote" release >/dev/null
+check 'an explicit name overrides the url' "$(s rooms | sed 's/^..//' | tr '\n' ' ')" 'board release '
+check 'a trailing slash still derives the name' \
+  "$(s subscribe "$remote/" third >/dev/null; s rooms | sed 's/^..//' | tr '\n' ' ')" 'board release third '
+check 'subscribe --json names the room' \
+  "$(s subscribe --json "$remote" fourth | sed 's/.*"room":"\([^"]*\)".*/\1/')" 'fourth'
+
+s subscribe "$remote" 'bad room' >/dev/null 2>&1 && no 'subscribe refuses an unsafe room name' || ok 'subscribe refuses an unsafe room name'
+out=$(s subscribe "$work/nope.git" 2>&1 >/dev/null | tail -1)
+case $out in 'moot: cannot clone '*) ok 'a clone that fails says so in moot'"'"'s voice' ;; *) no 'a clone that fails says so in moot'"'"'s voice' "$out" ;; esac
+[ -e "$host/.moot/rooms/nope" ] && no 'and leaves no half-room behind' || ok 'and leaves no half-room behind'
+
+# The one verb with a hard dependency says which one, rather than leaking
+# git's own stderr from three frames down.
+# A PATH with everything the tool uses except the one thing this verb needs.
+mkdir -p "$work/nogit"
+for p in /bin/* /usr/bin/*; do
+  b=${p##*/}
+  [ "$b" = git ] && continue
+  ln -sf "$p" "$work/nogit/$b" 2>/dev/null
+done
+out=$(PATH="$work/nogit" "$work/nogit/bash" "$host/.moot/moot.sh" subscribe "$remote" solo 2>&1 >/dev/null | tail -1)
+check 'subscribe without git says so plainly' "$out" 'moot: subscribe needs git on PATH'
+
 group 'room resolution'
 host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
 out=$(j post --as bob -m 'x' 2>&1 >/dev/null)
