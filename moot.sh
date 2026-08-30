@@ -387,6 +387,87 @@ cmd_subscribe() {
   fi
 }
 
+# ---------------------------------------------------------------- git transport
+
+# A room that is a clone syncs; a room that is not, does not. That is the whole
+# detection rule — no flag, no config key, no per-room settings file — and it
+# is why every helper below is guarded by this one.
+#
+# The .git test comes first for a second reason: without it, `git -C` on an
+# ordinary room would walk up and find the project repository that happens to
+# contain .moot/, and operate on that instead.
+room_is_clone() {
+  [ -e "$room_dir/.git" ] && command -v git >/dev/null 2>&1
+}
+
+git_room() { git -C "$room_dir" "$@"; }
+
+# The branch the remote itself declares. Asking the remote rather than assuming
+# the local name settles the case where two participants clone the same empty
+# repository under different init.defaultBranch settings and would otherwise
+# push past each other forever.
+git_room_target() {
+  local b
+  b=$(git_room ls-remote --symref origin HEAD 2>/dev/null \
+        | sed -n 's#^ref: refs/heads/\([^[:space:]]*\).*#\1#p' | head -n 1)
+  [ -n "$b" ] || b=$(git_room symbolic-ref --quiet --short HEAD 2>/dev/null) || b=
+  printf '%s' "$b"
+}
+
+# Bring the room up to date. Fetching with no refspec follows whatever branch
+# the remote's HEAD points at, so FETCH_HEAD is the room's current state
+# whatever anyone called their branch.
+#
+# Rebase rather than reset: a reset would discard a post committed while the
+# remote was unreachable, and losing a message is the one failure a board must
+# not have. Rebase is a no-op when there is nothing local, a fast-forward when
+# only the remote moved, and a replay when both did.
+git_room_fetch() {
+  git_room fetch --quiet origin 2>/dev/null || return 1
+  git_room rev-parse --quiet --verify FETCH_HEAD >/dev/null 2>&1 || return 0
+  if git_room rev-parse --quiet --verify HEAD >/dev/null 2>&1; then
+    # The identity is set here for the same reason git_room_commit sets it: a
+    # rebase writes commits too, and a host with no git config must still be
+    # able to read its room.
+    git_room -c user.name=moot -c user.email=moot@moot.invalid \
+      rebase --quiet FETCH_HEAD >/dev/null 2>&1 && return 0
+    git_room rebase --abort >/dev/null 2>&1 || true
+    return 1
+  fi
+  # Nothing committed here yet, so there is nothing to replay: take the remote
+  # wholesale. Untracked posts written before the first fetch are left alone.
+  git_room reset --quiet --hard FETCH_HEAD >/dev/null 2>&1 || return 1
+}
+
+# The commit is transport, not authorship — the filename already carries who
+# and when. The identity is set explicitly so a host with no git config can
+# still post, and so the log reads in moot's names rather than the machine's.
+git_room_commit() {
+  local id=$1 sender=$2
+  git_room add -A -- posts >/dev/null 2>&1 || return 1
+  if git_room diff --cached --quiet 2>/dev/null; then
+    return 0
+  fi
+  git_room -c "user.name=$sender" -c "user.email=$sender@moot.invalid" \
+    commit --quiet -m "$id" >/dev/null 2>&1
+}
+
+# A rejected push means someone else posted in the meantime. Unlike almost
+# everywhere else in git, this retry loop is honest rather than hopeful: every
+# post is a new uniquely named file, so the rebase it retries after has no
+# conflict available to have.
+git_room_push() {
+  local target n=0
+  target=$(git_room_target)
+  [ -n "$target" ] || return 1
+  while :; do
+    git_room push --quiet origin "HEAD:refs/heads/$target" >/dev/null 2>&1 && return 0
+    n=$((n + 1))
+    [ "$n" -le 3 ] || return 1
+    git_room_fetch || return 1
+  done
+}
+
 # ---------------------------------------------------------------- post
 
 cmd_post() {
@@ -439,6 +520,18 @@ cmd_post() {
   done
   rm -f -- "$landing"
 
+  # The post is a file on a disk before git is involved, and it stays one if
+  # every network in the world is down. Commit, then push best-effort: a push
+  # that cannot go out now goes out with the next post or catchup.
+  local warn=
+  if room_is_clone; then
+    if git_room_commit "$base" "$sender"; then
+      git_room_push || warn="posted, but could not push $room to its remote"
+    else
+      warn="posted, but could not commit $room to its clone"
+    fi
+  fi
+
   if [ "$json" = 1 ]; then
     printf '{"schema_version":1,"command":"post","ok":true,"changed":true,"room":"%s","id":"%s","path":"%s","sender":"%s","timestamp":"%s"}\n' \
       "$(json_escape "$room")" \
@@ -447,6 +540,9 @@ cmd_post() {
   else
     printf 'posted rooms/%s/posts/%s.md\n' "$room" "$base"
   fi
+  # Out of band in both modes: a --json caller reads one object on stdout, and
+  # a failed push is news about the transport rather than about the post.
+  [ -z "$warn" ] || printf 'moot: %s\n' "$warn" >&2
 }
 
 # ---------------------------------------------------------------- read
@@ -726,6 +822,22 @@ cmd_catchup() {
   sweep_changed=0
   for r in ${rooms[@]+"${rooms[@]}"}; do
     use_room "$r"
+    # Reader-initiated pull. catchup is already the verb that asks "is there
+    # anything for me", so the fetch belongs here and nowhere else. A fetch
+    # that fails is not a failed catchup: the room is a directory, and the
+    # directory is still readable.
+    if room_is_clone; then
+      if git_room_fetch; then
+        # Anything local that the rebase kept is a backlog from a post made
+        # while the remote was unreachable. This is where it drains.
+        if [ "$(git_room rev-parse HEAD 2>/dev/null)" \
+             != "$(git_room rev-parse FETCH_HEAD 2>/dev/null)" ]; then
+          git_room_push || true
+        fi
+      else
+        printf 'moot: could not fetch %s; reading what is here\n' "$r" >&2
+      fi
+    fi
     [ -d "$posts_dir" ] || continue
     catchup_room "$me" "$deliver" "$json"
   done

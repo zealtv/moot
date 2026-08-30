@@ -168,6 +168,61 @@ done
 out=$(PATH="$work/nogit" "$work/nogit/bash" "$host/.moot/moot.sh" subscribe "$remote" solo 2>&1 >/dev/null | tail -1)
 check 'subscribe without git says so plainly' "$out" 'moot: subscribe needs git on PATH'
 
+# ---------------------------------------------------------------- git transport
+
+# Two clones of one bare repository, exchanging posts with no manual git.
+group 'a cloned room syncs both ways'
+remote=$(new_remote)
+a=$(new_host); b=$(new_host)
+"$a/.moot/moot.sh" subscribe "$remote" >/dev/null
+"$b/.moot/moot.sh" subscribe "$remote" >/dev/null
+al() { "$a/.moot/moot.sh" "$@"; }; bo() { "$b/.moot/moot.sh" "$@"; }
+al post --as alice -m 'hello from alice' >/dev/null
+bo catchup --as bob >/dev/null
+check 'a post reaches the other clone through catchup' "$(bo read | grep -c 'hello from alice')" '1'
+bo post --as bob -m 'and back' >/dev/null
+al catchup --as alice >/dev/null
+check 'and the reply comes back the same way' "$(al read | grep -c 'and back')" '1'
+id=$(al post --json --as alice -m 'named commit' | sed 's/.*"id":"\([^"]*\)".*/\1/')
+check 'the commit is named for the post' "$(git -C "$a/.moot/rooms/board" log -1 --pretty=%s)" "$id"
+check 'and nothing outside posts/ is tracked' "$(git -C "$a/.moot/rooms/board" ls-files | grep -cv '^posts/')" '0'
+
+# The one failure a board must not have. The post is a file before git is
+# involved, so the network can only cost a warning.
+group 'a post survives an unreachable remote'
+mv "$remote" "$remote.gone"
+al post --as alice -m 'written while offline' 2>"$work/warn" >/dev/null; rc=$?
+check 'and exits clean' "$rc" '0'
+check 'post warns rather than failing' "$(tail -1 "$work/warn")" 'moot: posted, but could not push board to its remote'
+check 'and the post is here regardless' "$(al read | grep -c 'written while offline')" '1'
+out=$(bo catchup --as bob 2>&1 >/dev/null | tail -1)
+check 'catchup warns and reads what is here' "$out" 'moot: could not fetch board; reading what is here'
+mv "$remote.gone" "$remote"
+al catchup --as alice >/dev/null
+bo catchup --as bob >/dev/null
+check 'the backlog drains on the next catchup' "$(bo read | grep -c 'written while offline')" '1'
+
+# Immutable uniquely-named files mean the rebase behind the push retry has no
+# conflict available to have.
+group 'two clones posting at once'
+al post --as alice -m 'alice over bob' >/dev/null 2>&1
+bo post --as bob -m 'bob over alice' >/dev/null 2>&1
+al catchup --as alice >/dev/null; bo catchup --as bob >/dev/null
+al catchup --as alice >/dev/null
+check 'both messages reach alice' "$(al read | grep -c ' over ')" '2'
+check 'both messages reach bob' "$(bo read | grep -c ' over ')" '2'
+check 'and neither clone invented a post' \
+  "$(ls "$a/.moot/rooms/board/posts"/*.md | wc -l | tr -d ' ')" \
+  "$(ls "$b/.moot/rooms/board/posts"/*.md | wc -l | tr -d ' ')"
+
+# A room that is a clone syncs; a room that is not, does not.
+group 'a room that is not a clone is untouched'
+host=$(new_room); m() { "$host/.moot/moot.sh" "$@"; }
+m post --as bob -m 'plain room' >/dev/null
+check 'catchup on a plain room says nothing about git' "$(m catchup --as bob 2>&1 >/dev/null)" ''
+check 'post on a plain room says nothing about git' "$(m post --as bob -m 'again' 2>&1 >/dev/null)" ''
+[ -e "$host/.moot/rooms/board/.git" ] && no 'and no repository appears' || ok 'and no repository appears'
+
 group 'room resolution'
 host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
 out=$(j post --as bob -m 'x' 2>&1 >/dev/null)
