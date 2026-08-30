@@ -12,9 +12,19 @@ set -euo pipefail
 export LC_ALL=C
 
 moot_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-room=$(dirname -- "$moot_dir")
+
+# The room is the folder .moot/ sits in, and posts/ is all of it. This is the
+# seam where a .moot/ subscribed to several rooms would choose between them;
+# until then there is one room and it is the parent.
+resolve_room() { dirname -- "$moot_dir"; }
+
+room=$(resolve_room)
 posts_dir="$room/posts"
-seen_dir="$room/seen"
+
+# The cursor is mine, not the room's, so it lives in .moot/ with the rest of
+# this participant's state. Keyed by name: a .moot/ that gets synced by
+# accident still has one writer per path.
+seen_dir="$moot_dir/seen"
 
 die() { printf 'moot: %s\n' "$*" >&2; exit 1; }
 
@@ -33,7 +43,7 @@ usage() {
   cat <<'USAGE'
 moot — a directory of messages
 
-  moot.sh init [--json]
+  moot.sh init [--json] [--as <name>]
   moot.sh post [--json] [--as <name>] [-m <text> | -f <file> | -]
   moot.sh read [--since <post-id>] [--tail <n>] [--follow]
   moot.sh catchup [--json] [--as <name>] [--deliver <dir>]
@@ -45,15 +55,28 @@ USAGE
 
 # ---------------------------------------------------------------- name resolution
 
-# --as, then $MOOT_NAME, then the host's .gremlin/name, then $USER. Every step
-# reads something that already exists, so a participant needs no moot config of
-# its own. Shared with catchup: one chain, one concept.
+# --as, then $MOOT_NAME, then .moot/name, then the host's .gremlin/name, then
+# $USER. Nobody is obliged to have a name file: every other step reads
+# something that already exists. Shared with catchup: one chain, one concept.
+
+moot_name() {
+  [ -r "$moot_dir/name" ] || return 1
+  head -n 1 -- "$moot_dir/name" | tr -d '[:space:]'
+}
+
+# .gremlin/name is a key=value file (name=tengu, source=generated), so take the
+# field rather than the line. An older bare-name file has no =, and still
+# resolves. Searched upward from the working directory, because a gremlin runs
+# catchup from its own repo root while the room lives somewhere else.
 gremlin_name() {
-  local dir
+  local dir file value
   dir=$PWD
   while :; do
-    if [ -r "$dir/.gremlin/name" ]; then
-      head -n 1 -- "$dir/.gremlin/name" | tr -d '[:space:]'
+    file="$dir/.gremlin/name"
+    if [ -r "$file" ]; then
+      value=$(sed -n 's/^name=//p' "$file" | head -n 1 | tr -d '[:space:]')
+      [ -n "$value" ] || value=$(head -n 1 -- "$file" | tr -d '[:space:]')
+      printf '%s' "$value"
       return 0
     fi
     [ "$dir" = / ] && break
@@ -68,6 +91,8 @@ resolve_name() {
     name=$as
   elif [ -n "${MOOT_NAME:-}" ]; then
     name=$MOOT_NAME
+  elif name=$(moot_name) && [ -n "$name" ]; then
+    :
   elif name=$(gremlin_name) && [ -n "$name" ]; then
     :
   elif [ -n "${USER:-}" ]; then
@@ -113,14 +138,30 @@ post_body_path() {
 # ---------------------------------------------------------------- init
 
 cmd_init() {
-  local json=0 changed=0 d
+  local json=0 changed=0 as= d
   [ "${1:-}" = --json ] && { json=1; shift; }
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --as) [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
+      -h|--help) usage; return 0 ;;
+      *) die "unknown option for init: $1" ;;
+    esac
+  done
   for d in "$posts_dir" "$seen_dir"; do
     [ -d "$d" ] || { mkdir -p -- "$d"; changed=1; }
-    # Git cannot track an empty directory; without this a moot committed
-    # before its first post loses its trays on clone.
-    [ -e "$d/.gitkeep" ] || { : > "$d/.gitkeep"; changed=1; }
   done
+  # Git cannot track an empty directory; without this a moot committed before
+  # its first post loses posts/ on clone. Only the room needs it: a .gitkeep
+  # inside .moot/ would invite committing one participant's state.
+  [ -e "$posts_dir/.gitkeep" ] || { : > "$posts_dir/.gitkeep"; changed=1; }
+  # Only written when asked for. Without it the rest of the name chain
+  # resolves, which is how a gremlin or a human already has a name.
+  if [ -n "$as" ]; then
+    local checked; checked=$(resolve_name "$as")
+    if [ "$checked" != "$(cat -- "$moot_dir/name" 2>/dev/null || true)" ]; then
+      printf '%s\n' "$checked" > "$moot_dir/name"; changed=1
+    fi
+  fi
   if [ "$json" = 1 ]; then
     printf '{"schema_version":1,"command":"init","ok":true,"changed":%s,"room":"%s"}\n' \
       "$([ "$changed" = 1 ] && echo true || echo false)" "$(json_escape "$room")"
@@ -408,9 +449,9 @@ cmd_catchup() {
     fi
   done
 
-  # Advance the cursor past everything read, mentioned or not. One writer per
-  # path: only this participant ever writes seen/<its own name>, which is what
-  # keeps two divergent copies of the room reconciling as cleanly as posts do.
+  # Advance the cursor past everything read, mentioned or not. The cursor is
+  # this participant's own state and never travels with the room, so two
+  # divergent copies reconcile on posts/ alone.
   local cursor_written=0
   if [ -n "$newest" ] && [ "$newest" != "$cursor" ]; then
     if mkdir -p -- "$seen_dir" 2>/dev/null && printf '%s\n' "$newest" > "$cursor_file" 2>/dev/null; then
@@ -419,7 +460,7 @@ cmd_catchup() {
       # A board reachable read-only is a normal way to run: delivery is still
       # correct, because delivered filenames carry the post id.
       printf 'moot: cannot write %s (read-only moot); nothing was delivered twice anyway\n' \
-        "seen/$me" >&2
+        ".moot/seen/$me" >&2
     fi
   fi
 

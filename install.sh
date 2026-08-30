@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #
-# Install moot into a directory, making it a moot room.
+# Install moot into a directory, making you a participant in it.
 #
 #   ./install.sh /path/to/room
 #
-# Copies moot.sh and README.md into <room>/.moot/, then runs init. The
-# deployed moot.sh operates on the .moot/ it lives in, so each room is
-# self-contained.
+# Copies moot.sh and README.md into <room>/.moot/, then runs init. The room is
+# the folder itself and holds only posts/; .moot/ is this participant's own
+# state, and the deployed moot.sh operates on the .moot/ it lives in.
+#
+# Into an empty folder this creates the room, because init creates posts/.
 
 set -euo pipefail
 

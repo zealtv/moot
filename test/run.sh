@@ -14,7 +14,7 @@ trap 'rm -rf -- "$work"' EXIT
 pass=0; fail=0
 
 ok()   { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
-no()   { fail=$((fail + 1)); printf '  FAIL %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; }
+no()   { fail=$((fail + 1)); printf '  FAIL %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; return 0; }
 check() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$3] got [$2]"; fi; }
 group() { printf '\n%s\n' "$1"; }
 
@@ -44,8 +44,12 @@ thaw_date() { PATH=${PATH#"$work/bin:"}; }
 group 'init'
 room=$(new_room)
 [ -d "$room/posts" ] && ok 'init creates posts/' || no 'init creates posts/'
-[ -d "$room/seen" ]  && ok 'init creates seen/'  || no 'init creates seen/'
+[ -d "$room/.moot/seen" ] && ok 'init creates .moot/seen/' || no 'init creates .moot/seen/'
 [ -f "$room/posts/.gitkeep" ] && ok 'init seeds posts/.gitkeep' || no 'init seeds posts/.gitkeep'
+# The room is the folder that syncs, and posts/ is all of it. A .gitkeep inside
+# .moot/ would invite committing one participant's state.
+[ -e "$room/.moot/seen/.gitkeep" ] && no 'init leaves .moot/ ungitkept' || ok 'init leaves .moot/ ungitkept'
+check 'the room holds nothing but posts/' "$(ls -A "$room" | grep -v '^\.moot$')" 'posts'
 
 "$room/.moot/moot.sh" post --as bob -m 'hello' >/dev/null
 out=$("$room/.moot/moot.sh" init)
@@ -183,16 +187,42 @@ MOOT_NAME=envname USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null
 check '$MOOT_NAME comes next' "$(sender_of "$room")" 'envname'
 
 room=$(new_room)
+printf 'localname\n' > "$room/.moot/name"
+mkdir -p "$room/.gremlin"
+printf 'name=tengu\n' > "$room/.gremlin/name"
+( cd "$room" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
+check '.moot/name comes next' "$(sender_of "$room")" 'localname'
+
+# .gremlin/name is a key=value file. Taking the whole line yields "name=tengu",
+# which is not a filename-safe sender.
+room=$(new_room)
+mkdir -p "$room/.gremlin"
+printf 'name=tengu\nsource=generated\nvocabulary=1\n' > "$room/.gremlin/name"
+( cd "$room" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
+check '.gremlin/name comes next' "$(sender_of "$room")" 'tengu'
+
+room=$(new_room)
 mkdir -p "$room/.gremlin"
 printf 'tengu\n' > "$room/.gremlin/name"
 ( cd "$room" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
-check '.gremlin/name comes next' "$(sender_of "$room")" 'tengu'
+check 'a bare .gremlin/name still resolves' "$(sender_of "$room")" 'tengu'
+
+room=$(new_room)
+printf 'bad=name\n' > "$room/.moot/name"
+( cd "$room" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null 2>&1 ) \
+  && no 'an unsafe .moot/name is an error' || ok 'an unsafe .moot/name is an error'
+
+room=$(new_room)
+"$room/.moot/moot.sh" init --as chosen >/dev/null
+check 'init --as writes .moot/name' "$(cat "$room/.moot/name")" 'chosen'
+( cd "$work" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
+check 'and posting picks it up' "$(sender_of "$room")" 'chosen'
 
 # A gremlin posts under its own name, not its folder's, and finds that name by
 # walking up from where it is working.
 room=$(new_room)
 mkdir -p "$room/.gremlin" "$room/deep/nested"
-printf 'fanta\n' > "$room/.gremlin/name"
+printf 'name=fanta\n' > "$room/.gremlin/name"
 ( cd "$room/deep/nested" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
 check '.gremlin/name is found from a subdirectory' "$(sender_of "$room")" 'fanta'
 
@@ -232,11 +262,11 @@ check 'catchup delivers a direct mention' "$(printf '%s' "$out" | grep -c 'can y
 check 'catchup delivers @all'             "$(printf '%s' "$out" | grep -c 'standup moved')" '1'
 check 'catchup skips an unmentioned post' "$(printf '%s' "$out" | grep -c 'unrelated')" '0'
 check 'catchup skips someone else atted'  "$(printf '%s' "$out" | grep -c 'nice work')" '0'
-check 'catchup writes the cursor' "$(cat "$room/seen/tengu")" '20260829-100400-bob'
+check 'catchup writes the cursor' "$(cat "$room/.moot/seen/tengu")" '20260829-100400-bob'
 
 out=$(m catchup --as tengu)
 check 'a re-run delivers nothing'  "$(printf '%s' "$out" | grep -c 'can you look at')" '0'
-check 'the cursor did not move back' "$(cat "$room/seen/tengu")" '20260829-100400-bob'
+check 'the cursor did not move back' "$(cat "$room/.moot/seen/tengu")" '20260829-100400-bob'
 
 say 20260829-100500-bob '@tengu one more'
 out=$(m catchup --as tengu)
@@ -244,14 +274,14 @@ check 'catchup resumes from the cursor' "$(printf '%s' "$out" | grep -c 'one mor
 check 'catchup does not re-deliver older mentions' "$(printf '%s' "$out" | grep -c 'can you look at')" '0'
 
 check 'the whole board is still readable' "$(m read | grep -c 'unrelated announcement')" '1'
-check 'catchup advanced past unmentioned posts' "$(cat "$room/seen/tengu")" '20260829-100500-bob'
+check 'catchup advanced past unmentioned posts' "$(cat "$room/.moot/seen/tengu")" '20260829-100500-bob'
 
 group 'catchup and nobody'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
 say 20260829-100000-bob 'hello @nobodyatall'
 out=$(m catchup --as tengu)
 check 'a mention of nobody reaches nobody' "$(printf '%s' "$out" | grep -c 'hello')" '0'
-check 'a mention of nobody still advances the cursor' "$(cat "$room/seen/tengu")" '20260829-100000-bob'
+check 'a mention of nobody still advances the cursor' "$(cat "$room/.moot/seen/tengu")" '20260829-100000-bob'
 check 'the mistyped mention is visible on the board' "$(m read | grep -c '@nobodyatall')" '1'
 
 group 'mention matching'
@@ -287,7 +317,7 @@ check 'a re-run delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 
 # Moot does not know what a nest is: gremlin integration is a path.
 rm -rf "$work/nest"; mkdir -p "$work/nest/in"
-rm -f "$room/seen/tengu"
+rm -f "$room/.moot/seen/tengu"
 m catchup --as tengu --deliver "$work/nest/in" >/dev/null
 check '--deliver takes any directory the caller names' "$(ls "$work/nest/in" | wc -l | tr -d ' ')" '1'
 
@@ -295,20 +325,20 @@ group 'catchup on a read-only moot'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
 say 20260829-100000-bob '@tengu the board is read-only from here'
 inbox="$work/ro-inbox"; rm -rf "$inbox"; mkdir -p "$inbox"
-chmod -w "$room/seen"
+chmod -w "$room/.moot/seen"
 m catchup --as tengu --deliver "$inbox" >/dev/null 2>"$work/ro.err"
 check 'a read-only moot still delivers' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 check 'a read-only moot warns about the cursor' "$(grep -c 'read-only moot' "$work/ro.err")" '1'
 m catchup --as tengu --deliver "$inbox" >/dev/null 2>&1
 check 'a read-only moot still delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
-chmod +w "$room/seen"
+chmod +w "$room/.moot/seen"
 
 group 'catchup name resolution and --json'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
-mkdir -p "$room/.gremlin"; printf 'fanta\n' > "$room/.gremlin/name"
+mkdir -p "$room/.gremlin"; printf 'name=fanta\n' > "$room/.gremlin/name"
 say 20260829-100000-bob '@fanta over to you'
 ( cd "$room" && MOOT_NAME= USER=username "$room/.moot/moot.sh" catchup >/dev/null )
-[ -f "$room/seen/fanta" ] && ok 'catchup uses the same name chain as post' || no 'catchup uses the same name chain as post'
+[ -f "$room/.moot/seen/fanta" ] && ok 'catchup uses the same name chain as post' || no 'catchup uses the same name chain as post'
 
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/posts/$1.md"; }
 say 20260829-100000-bob '@tengu hi'
@@ -321,7 +351,7 @@ case $out in *'"changed":false'*'"delivered":[]'*) ok 'catchup --json reports an
 group 'catchup on an empty board'
 room=$(new_room)
 "$room/.moot/moot.sh" catchup --as tengu >/dev/null 2>&1 && ok 'catchup on an empty board succeeds' || no 'catchup on an empty board succeeds'
-[ -e "$room/seen/tengu" ] && no 'an empty board writes no cursor' || ok 'an empty board writes no cursor'
+[ -e "$room/.moot/seen/tengu" ] && no 'an empty board writes no cursor' || ok 'an empty board writes no cursor'
 
 group 'catchup and attachments'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }
@@ -340,7 +370,23 @@ room=$(new_room)
 [ -x "$room/.moot/moot.sh" ] && ok 'install deploys an executable moot.sh' || no 'install deploys an executable moot.sh'
 [ -f "$room/.moot/README.md" ] && ok 'install deploys the README' || no 'install deploys the README'
 "$repo/install.sh" "$room" >/dev/null
-check 'install is repeatable' "$(ls -A "$room/.moot" | wc -l | tr -d ' ')" '2'
+check 'install is repeatable' "$(ls -A "$room/.moot" | wc -l | tr -d ' ')" '3'
+
+# Each participant keeps a copy of the room, and their state inside it. The
+# folder that syncs is posts/, and nothing in it is written by two hands.
+group 'two participants'
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }
+m post --as bob -m '@tengu morning' >/dev/null
+twin="$work/twin"; rm -rf "$twin"; cp -r "$room" "$twin"
+m catchup --as bob >/dev/null
+"$twin/.moot/moot.sh" catchup --as tengu >/dev/null
+[ -e "$room/.moot/seen/tengu" ] && no 'a cursor never travels to the other copy' || ok 'a cursor never travels to the other copy'
+[ -e "$twin/.moot/seen/bob" ] && no 'the other copy holds only its own cursor' || ok 'the other copy holds only its own cursor'
+"$twin/.moot/moot.sh" post --as tengu -m 'on it' >/dev/null
+before=$(cat "$room/.moot/seen/bob")
+rsync -a "$twin/posts/" "$room/posts/"; rsync -a "$room/posts/" "$twin/posts/"
+check 'the rooms reconcile on posts/ alone' "$(ls "$room/posts"/*.md | wc -l | tr -d ' ')" '2'
+check 'syncing the room leaves the cursor alone' "$(cat "$room/.moot/seen/bob")" "$before"
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

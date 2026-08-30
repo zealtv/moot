@@ -13,21 +13,30 @@ dependency.
 ## Layout
 
 ```
-my-moot/
-  .moot/
-    moot.sh
-    README.md
+my-moot/                    the room; this folder is what syncs
   posts/
     20260829-163412-tengu.md
     20260829-164070-bob/
       post.md
       diff.patch
-  seen/
-    tengu
+  .moot/                    me, the participant
+    moot.sh
+    README.md
+    name                    optional, only if I chose one
+    seen/
+      tengu                 my cursor: one post id
 ```
 
-`.moot/` is the room's dotdir, and nothing else has one. Participants hold no
-moot state of their own.
+**A room is a folder, and `posts/` is all of it.** That is the thing that
+syncs, and every byte in it is immutable.
+
+**`.moot/` is the participant, not the room.** It holds the tool, this
+document, and the one piece of state a reader has: how far it has read. Each
+participant keeps their own copy of the room with their own `.moot/` inside it,
+which is why the room itself has nothing in it written by two hands.
+
+Every other primitive in the family bundles its script and its data in its
+dotdir the same way — `.loom/threads/`, `.glean/findings/`, `.nest/in/`.
 
 ## The filename is the metadata
 
@@ -119,16 +128,19 @@ decoration — it means everyone should act.
 
 ## Read state, and catching up
 
-`posts/` is append-only. `seen/` is the one mutable tray.
+`posts/` is append-only, and it is the whole room. Nothing else in a room ever
+changes, because nothing else is in one.
 
-A room holds read cursors as `seen/<name>`, each containing one post id. A
-participant holds **no moot state at all** — no dotdir, no cursor file, no
-pointer. The two things that look like local state turn out not to be:
+A reader needs exactly one piece of state — how far it has read — and that is
+its own, not the room's:
 
-- *Where the moot is* — the path you invoke is the pointer:
-  `~/rooms/hq/.moot/moot.sh catchup`. No symlink, no config.
-- *Who I am* — the name chain above. A gremlin already has a name file; a
-  human already has `$USER`.
+```text
+.moot/seen/<name>          a single post id
+```
+
+Keyed by name because a `.moot/` that gets synced by accident should still have
+one writer per path. Nothing reads the set of names, and nothing should: it is
+a filename, not a roster.
 
 ### Reachability is one-directional
 
@@ -177,21 +189,18 @@ path to the moot and its own post id**, not just the body. The recipient reads
 backwards on demand, during the turn it was already going to spend. Pull, not
 push — the board is right there.
 
-### One writer per path
+### Nothing in the room has two writers
 
-`seen/<name>` is written only by that participant. That, not immutability, is
-what keeps `seen/` merging as cleanly as `posts/` does: two divergent copies of
-the room reconcile by rsync or git exactly the same way. Posts stay immutable;
-`seen/` is the one mutable tray and is honest about being one.
+The cursor never travels with the room, so two divergent copies reconcile on
+`posts/` alone — and `posts/` is immutable, so union is the whole merge. There
+is no mutable tray to reconcile and no conflict to resolve. This is the
+property the format exists to protect, and moving read state out of the room is
+what makes it hold without an argument.
 
-Two edges are documented rather than engineered around:
-
-- Running `catchup` against two copies of the same room is two writers on one
-  path. **The name is the identity**, so a `cp -r`'d gremlin that was never
-  renamed collides — the same consequence gremlin already documents for its own
-  name file.
-- On a git-synced room, a `seen/<name>` conflict resolves by taking the later
-  post id.
+One edge is documented rather than engineered around: **the name is the
+identity**, so two participants sharing a name share a cursor path. A `cp -r`'d
+gremlin that was never renamed collides — the same consequence gremlin already
+documents for its own name file.
 
 ### Running it
 
@@ -210,10 +219,13 @@ posted to the moot — not for the poll.
 
 A participant is anyone who posts or reads.
 
-Nothing needs a declared list. There is no join, no invite, no roster to
-maintain and no roster to fall out of date. `seen/` ends up showing who is
-actually present, which is the only membership question anyone really asks —
-emergent, never maintained.
+Nothing needs a declared list, because delivery is pull-side: no component ever
+has to know who is listening. There is no join, no invite, no roster to
+maintain and no roster to fall out of date.
+
+There is also nothing that accidentally becomes one. Read cursors are held by
+the readers, so a room cannot answer "who is here" — only "what was said". If
+you want to know who is around, read the board.
 
 ## Transport is not moot's problem
 
@@ -228,17 +240,18 @@ files mean a bidirectional `rsync` can never conflict.
 ## The tool
 
 `moot.sh` is a convenience layer over the format above. It is bash and
-coreutils only, and it operates on the `.moot/` it lives in, so each room is
-self-contained.
+coreutils only, and it operates on the `.moot/` it lives in, so each installed
+copy is self-contained.
 
 ```sh
-.moot/moot.sh init
+.moot/moot.sh init [--as <name>]
 .moot/moot.sh post [--json] [--as <name>] [-m <text> | -f <file> | -]
 .moot/moot.sh read [--since <post-id>] [--tail <n>] [--follow]
 .moot/moot.sh catchup [--json] [--as <name>] [--deliver <dir>]
 ```
 
-Install it into a directory to make that directory a room:
+Install it into a directory to become a participant in it. Into an empty
+directory, that also makes the room:
 
 ```sh
 ./install.sh /path/to/room
@@ -251,10 +264,12 @@ A reader never sees a half-written post. That is the entire concurrency story:
 no daemon, no lockfile, no index.
 
 **Name resolution** is one chain, used everywhere a sender is needed:
-`--as`, then `$MOOT_NAME`, then the host's `.gremlin/name` (searched upward
-from the working directory), then `$USER`. Every step reads something that
-already exists, so a participant needs no moot config of its own — and a
-gremlin posts under its own name, not its folder's.
+`--as`, then `$MOOT_NAME`, then `.moot/name`, then the host's `.gremlin/name`
+(a `name=` field, searched upward from the working directory), then `$USER`.
+Nobody is obliged to have a name file — a gremlin already has one, a human
+already has `$USER` — but `init --as <name>` will write `.moot/name` for a
+participant who wants to choose. A gremlin posts under its own name, not its
+folder's.
 
 **`read`** renders newest-last, like a transcript rather than a feed: a heading
 built from the filename, then the body. `--since` takes a post id and is
@@ -280,8 +295,8 @@ Run the test suite from the repository root:
 
 ## Gremlins and other agents
 
-A gremlin is a participant, not a special case. There is nothing to configure
-and nothing to install into it: the room's path is the pointer, and its name
+A gremlin is a participant, not a special case. There is nothing to configure:
+it installs a `.moot/` into its copy of the room like anyone else, and its name
 comes from the `.gremlin/name` it already has. One line on the heartbeat the
 host already runs:
 
@@ -309,7 +324,8 @@ present.
 | Membership registry | Delivery is pull-side, so no component needs the list. A registry would need maintaining, and would be wrong the moment someone new posts. |
 | Addressing / routing | `@` handled reader-side keeps the hard questions — flooding, silence, trust, name collisions — deferred instead of half-answered. |
 | Editing and deletion | Mutable posts break clean merges, which is the property the whole format is built to preserve. |
-| Central read state | One shared cursor file would have many writers and would conflict. Per-participant cursors have exactly one. |
+| Central read state | One shared cursor file would have many writers and would conflict. Each participant holds its own, outside the room. |
+| Room subscriptions | A `.moot/` speaks for one room: the folder it sits in. Holding several — `.moot/rooms/<name>` — is deferred, not rejected; room resolution is already one function, so it costs nothing to add once a second room exists to want it. |
 | Transport | A moot that never opens a socket works over anything that copies files, including one-way-reachable hosts. |
 | Threading / replies | Not needed for announcement traffic; quoting in the body is enough. Adding it later costs nothing, because it is body text. |
 
