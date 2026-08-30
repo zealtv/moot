@@ -6,25 +6,27 @@
 # done by hand with date, cat, and ls; see README.md for the format itself.
 #
 # It operates on the .moot/ it lives in, so each deployed copy is
-# self-contained.
+# self-contained. Everything moot needs is under that one directory: the rooms
+# it holds, and this participant's own read state beside them.
 
 set -euo pipefail
 export LC_ALL=C
 
 moot_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
-# The room is the folder .moot/ sits in, and posts/ is all of it. This is the
-# seam where a .moot/ subscribed to several rooms would choose between them;
-# until then there is one room and it is the parent.
-resolve_room() { dirname -- "$moot_dir"; }
+# A room is a folder under rooms/, and posts/ is all of it. That folder is the
+# sync unit; nothing else in .moot/ travels with it.
+rooms_dir="$moot_dir/rooms"
 
-room=$(resolve_room)
-posts_dir="$room/posts"
-
-# The cursor is mine, not the room's, so it lives in .moot/ with the rest of
-# this participant's state. Keyed by name: a .moot/ that gets synced by
-# accident still has one writer per path.
+# The cursor is mine, not the room's, so it lives beside rooms/ rather than
+# inside one. Keyed by room and then by name: a room that gets synced by
+# accident still carries no reader's state, and each room is read separately.
 seen_dir="$moot_dir/seen"
+
+# Set by use_room(); every verb that is aimed at one room resolves first.
+room=
+room_dir=
+posts_dir=
 
 die() { printf 'moot: %s\n' "$*" >&2; exit 1; }
 
@@ -43,19 +45,22 @@ usage() {
   cat <<'USAGE'
 moot — a directory of messages
 
-  moot.sh init [--json] [--as <name>]
-  moot.sh post [--json] [--as <name>] [-m <text> | -f <file> | -]
-  moot.sh read [--since <post-id>] [--tail <n>] [--follow]
-  moot.sh catchup [--json] [--as <name>] [--deliver <dir>]
+  moot.sh init [--json] [--as <name>] [--room <name>]
+  moot.sh join [--json] <room>
+  moot.sh rooms
+  moot.sh post [--json] [--as <name>] [--room <name>] [-m <text> | -f <file> | -]
+  moot.sh read [--room <name>] [--since <post-id>] [--tail <n>] [--follow]
+  moot.sh catchup [--json] [--as <name>] [--room <name>] [--deliver <dir>]
 
-A post is <YYYYMMDD>-<HHMMSS>-<sender>.md in posts/, UTC, plain Markdown.
-Posts are immutable: there is no edit and no delete. A correction is a new post.
+A post is <YYYYMMDD>-<HHMMSS>-<sender>.md in rooms/<room>/posts/, UTC, plain
+Markdown. Posts are immutable: there is no edit and no delete. A correction is
+a new post.
 USAGE
 }
 
 # ---------------------------------------------------------------- name resolution
 
-# --as, then $MOOT_NAME, then .moot/name, then the host's .gremlin/name, then
+# --as, then $MOOT_NAME, then .moot/name, then the sibling .gremlin/name, then
 # $USER. Nobody is obliged to have a name file: every other step reads
 # something that already exists. Shared with catchup: one chain, one concept.
 
@@ -85,6 +90,16 @@ gremlin_name() {
   return 1
 }
 
+# A path segment written by this tool has to be filename-safe, whether it names
+# a sender or a room. One check, one message shape, two callers.
+check_segment() {
+  local kind=$1 value=$2
+  case $value in
+    *[!A-Za-z0-9._-]* | .* | '')
+      die "$kind '$value' is not filename-safe (use A-Z a-z 0-9 . _ -)" ;;
+  esac
+}
+
 resolve_name() {
   local as=${1:-} name=
   if [ -n "$as" ]; then
@@ -99,11 +114,73 @@ resolve_name() {
     name=$USER
   fi
   [ -n "$name" ] || die "cannot resolve a sender name (try --as <name>)"
-  case $name in
-    *[!A-Za-z0-9._-]* | .* | '')
-      die "sender name '$name' is not filename-safe (use A-Z a-z 0-9 . _ -)" ;;
-  esac
+  check_segment 'sender name' "$name"
   printf '%s' "$name"
+}
+
+# ---------------------------------------------------------------- room resolution
+
+# Subscribed rooms, lexically. A room is subscribed by being a directory under
+# rooms/: one that arrived over rsync needs no join to count.
+subscribed_rooms() {
+  local entry base
+  [ -d "$rooms_dir" ] || return 0
+  for entry in "$rooms_dir"/*; do
+    [ -d "$entry" ] || continue
+    base=${entry##*/}
+    case $base in .*) continue ;; esac
+    printf '%s\n' "$base"
+  done
+}
+
+room_pointer() {
+  [ -r "$moot_dir/room" ] || return 1
+  head -n 1 -- "$moot_dir/room" | tr -d '[:space:]'
+}
+
+# --room, then $MOOT_ROOM, then .moot/room, then the sole room. The same shape
+# as the name chain, for the same reason: with one room nobody types a flag.
+default_room() {
+  local name=
+  if [ -n "${MOOT_ROOM:-}" ]; then
+    name=$MOOT_ROOM
+  elif name=$(room_pointer) && [ -n "$name" ]; then
+    :
+  else
+    local rooms=()
+    while IFS= read -r name; do rooms+=("$name"); done < <(subscribed_rooms)
+    [ ${#rooms[@]} = 1 ] || return 1
+    name=${rooms[0]}
+  fi
+  [ -n "$name" ] || return 1
+  printf '%s' "$name"
+}
+
+# The error is the entire user interface of holding several rooms, so it says
+# what is subscribed and what to type, not what the usage line looks like.
+no_room() {
+  local rooms=() r
+  while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms)
+  if [ ${#rooms[@]} = 0 ]; then
+    die "no rooms here yet. Create one with: $0 join <room>"
+  fi
+  printf 'moot: several rooms here and none chosen:\n' >&2
+  printf '  %s\n' "${rooms[@]}" >&2
+  printf 'Pick one with --room <room>, or make one the default with: %s init --room <room>\n' "$0" >&2
+  exit 1
+}
+
+# Resolve the room this command is aimed at and point posts_dir at it.
+use_room() {
+  local want=${1:-}
+  if [ -n "$want" ]; then
+    room=$want
+  else
+    room=$(default_room) || no_room
+  fi
+  check_segment 'room name' "$room"
+  room_dir="$rooms_dir/$room"
+  posts_dir="$room_dir/posts"
 }
 
 # ---------------------------------------------------------------- post listing
@@ -138,22 +215,21 @@ post_body_path() {
 # ---------------------------------------------------------------- init
 
 cmd_init() {
-  local json=0 changed=0 as= d
+  local json=0 changed=0 as= room_opt= d
   [ "${1:-}" = --json ] && { json=1; shift; }
   while [ $# -gt 0 ]; do
     case $1 in
       --as) [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
+      --room) [ $# -ge 2 ] || die "--room needs a room"; room_opt=$2; shift 2 ;;
       -h|--help) usage; return 0 ;;
       *) die "unknown option for init: $1" ;;
     esac
   done
-  for d in "$posts_dir" "$seen_dir"; do
+  # init makes a participant, not a room: it no longer knows which room, and
+  # `join` is the only thing that creates one.
+  for d in "$rooms_dir" "$seen_dir"; do
     [ -d "$d" ] || { mkdir -p -- "$d"; changed=1; }
   done
-  # Git cannot track an empty directory; without this a moot committed before
-  # its first post loses posts/ on clone. Only the room needs it: a .gitkeep
-  # inside .moot/ would invite committing one participant's state.
-  [ -e "$posts_dir/.gitkeep" ] || { : > "$posts_dir/.gitkeep"; changed=1; }
   # Only written when asked for. Without it the rest of the name chain
   # resolves, which is how a gremlin or a human already has a name.
   if [ -n "$as" ]; then
@@ -162,26 +238,85 @@ cmd_init() {
       printf '%s\n' "$checked" > "$moot_dir/name"; changed=1
     fi
   fi
-  if [ "$json" = 1 ]; then
-    printf '{"schema_version":1,"command":"init","ok":true,"changed":%s,"room":"%s"}\n' \
-      "$([ "$changed" = 1 ] && echo true || echo false)" "$(json_escape "$room")"
-  elif [ "$changed" = 1 ]; then
-    printf 'initialised moot at %s\n' "$room"
-  else
-    printf 'moot already initialised at %s\n' "$room"
+  # Likewise .moot/room: a pointer, written only on request, and unnecessary
+  # for as long as there is one room to point at.
+  if [ -n "$room_opt" ]; then
+    check_segment 'room name' "$room_opt"
+    if [ "$room_opt" != "$(cat -- "$moot_dir/room" 2>/dev/null || true)" ]; then
+      printf '%s\n' "$room_opt" > "$moot_dir/room"; changed=1
+    fi
   fi
+  local default; default=$(default_room) || default=
+  if [ "$json" = 1 ]; then
+    printf '{"schema_version":1,"command":"init","ok":true,"changed":%s,"moot":"%s","room":%s}\n' \
+      "$([ "$changed" = 1 ] && echo true || echo false)" "$(json_escape "$moot_dir")" \
+      "$([ -n "$default" ] && printf '"%s"' "$(json_escape "$default")" || printf null)"
+  elif [ "$changed" = 1 ]; then
+    printf 'initialised moot at %s\n' "$moot_dir"
+    [ -n "$default" ] || printf 'no rooms yet: %s join <room>\n' "$0"
+  else
+    printf 'moot already initialised at %s\n' "$moot_dir"
+    [ -n "$default" ] || printf 'no rooms yet: %s join <room>\n' "$0"
+  fi
+}
+
+# ---------------------------------------------------------------- join and rooms
+
+cmd_join() {
+  local json=0 name= changed=0
+  [ "${1:-}" = --json ] && { json=1; shift; }
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -h|--help) usage; return 0 ;;
+      -*) die "unknown option for join: $1" ;;
+      *) [ -z "$name" ] || die "join takes one room"; name=$1; shift ;;
+    esac
+  done
+  [ -n "$name" ] || die "join needs a room name"
+  check_segment 'room name' "$name"
+
+  local posts="$rooms_dir/$name/posts"
+  [ -d "$posts" ] || { mkdir -p -- "$posts"; changed=1; }
+  # Git cannot track an empty directory; without this a room committed before
+  # its first post loses posts/ on clone. Only the room needs it: a .gitkeep
+  # anywhere else in .moot/ would invite committing one participant's state.
+  [ -e "$posts/.gitkeep" ] || { : > "$posts/.gitkeep"; changed=1; }
+  [ -d "$seen_dir/$name" ] || { mkdir -p -- "$seen_dir/$name"; changed=1; }
+
+  if [ "$json" = 1 ]; then
+    printf '{"schema_version":1,"command":"join","ok":true,"changed":%s,"room":"%s","path":"%s"}\n' \
+      "$([ "$changed" = 1 ] && echo true || echo false)" \
+      "$(json_escape "$name")" "$(json_escape "rooms/$name")"
+  elif [ "$changed" = 1 ]; then
+    printf 'joined %s\n' "rooms/$name"
+  else
+    printf 'already in %s\n' "rooms/$name"
+  fi
+}
+
+cmd_rooms() {
+  local default r any=0
+  [ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { usage; return 0; }
+  [ $# -eq 0 ] || die "rooms takes no arguments"
+  default=$(default_room) || default=
+  while IFS= read -r r; do
+    any=1
+    if [ "$r" = "$default" ]; then printf '* %s\n' "$r"; else printf '  %s\n' "$r"; fi
+  done < <(subscribed_rooms)
+  [ "$any" = 1 ] || printf 'no rooms here yet: %s join <room>\n' "$0"
 }
 
 # ---------------------------------------------------------------- post
 
 cmd_post() {
-  local json=0 as= body= have_body=0 stamp base target landing n
+  local json=0 as= room_opt= body= have_body=0 stamp base target landing n
 
   [ "${1:-}" = --json ] && { json=1; shift; }
 
   while [ $# -gt 0 ]; do
     case $1 in
       --as) [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
+      --room) [ $# -ge 2 ] || die "--room needs a room"; room_opt=$2; shift 2 ;;
       -m)   [ $# -ge 2 ] || die "-m needs text"; body=$2; have_body=1; shift 2 ;;
       -f)   [ $# -ge 2 ] || die "-f needs a file"
             [ -r "$2" ] || die "cannot read $2"
@@ -198,7 +333,8 @@ cmd_post() {
   fi
   [ -n "${body//[[:space:]]/}" ] || die "refusing to post an empty message"
 
-  [ -d "$posts_dir" ] || die "no posts/ directory at $room (run: $0 init)"
+  use_room "$room_opt"
+  [ -d "$posts_dir" ] || die "no posts/ in room $room (run: $0 join $room)"
 
   local sender; sender=$(resolve_name "$as")
   stamp=$(date -u +%Y%m%d-%H%M%S)
@@ -223,11 +359,12 @@ cmd_post() {
   rm -f -- "$landing"
 
   if [ "$json" = 1 ]; then
-    printf '{"schema_version":1,"command":"post","ok":true,"changed":true,"id":"%s","path":"%s","sender":"%s","timestamp":"%s"}\n' \
-      "$(json_escape "$base")" "$(json_escape "posts/$base.md")" \
+    printf '{"schema_version":1,"command":"post","ok":true,"changed":true,"room":"%s","id":"%s","path":"%s","sender":"%s","timestamp":"%s"}\n' \
+      "$(json_escape "$room")" \
+      "$(json_escape "$base")" "$(json_escape "rooms/$room/posts/$base.md")" \
       "$(json_escape "$sender")" "$(json_escape "$stamp")"
   else
-    printf 'posted posts/%s.md\n' "$base"
+    printf 'posted rooms/%s/posts/%s.md\n' "$room" "$base"
   fi
 }
 
@@ -283,10 +420,11 @@ render_post() {
 }
 
 cmd_read() {
-  local since= tail_n= follow=0 id last=
+  local since= tail_n= follow=0 room_opt= id last=
 
   while [ $# -gt 0 ]; do
     case $1 in
+      --room)  [ $# -ge 2 ] || die "--room needs a room"; room_opt=$2; shift 2 ;;
       --since) [ $# -ge 2 ] || die "--since needs a post id"; since=$2; shift 2 ;;
       --tail)  [ $# -ge 2 ] || die "--tail needs a count"; tail_n=$2; shift 2
                case $tail_n in ''|*[!0-9]*) die "--tail needs a number" ;; esac ;;
@@ -296,7 +434,8 @@ cmd_read() {
     esac
   done
 
-  [ -d "$posts_dir" ] || die "no posts/ directory at $room (run: $0 init)"
+  use_room "$room_opt"
+  [ -d "$posts_dir" ] || die "no posts/ in room $room (run: $0 join $room)"
   init_colour
 
   local ids=() shown=()
@@ -364,7 +503,7 @@ post_mentions_me() {
   return 1
 }
 
-# A delivered item carries the path to the moot and its own post id, not just
+# A delivered item carries the path to the room and its own post id, not just
 # the body. A cursor may have advanced silently past thirty announcements
 # before one asks for something, so the recipient needs to be able to read
 # backwards on demand — pull, not push. The board is right there.
@@ -384,7 +523,7 @@ deliver_post() {
     printf '# moot mention · %s · %s-%s-%s %s:%s:%s UTC\n\n' \
       "$sender" "${day:0:4}" "${day:4:2}" "${day:6:2}" \
       "${time:0:2}" "${time:2:2}" "${time:4:2}"
-    printf -- '- moot: `%s`\n' "$room"
+    printf -- '- moot: `%s`\n' "$room_dir"
     printf -- '- post: `%s`\n' "$id"
     printf -- '- read back: `%s read --tail 20`\n\n' "$moot_dir/moot.sh"
     printf -- '---\n\n'
@@ -404,23 +543,25 @@ deliver_post() {
 }
 
 cmd_catchup() {
-  local json=0 as= deliver= id
+  local json=0 as= room_opt= deliver= id
 
   [ "${1:-}" = --json ] && { json=1; shift; }
 
   while [ $# -gt 0 ]; do
     case $1 in
       --as)      [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
+      --room)    [ $# -ge 2 ] || die "--room needs a room"; room_opt=$2; shift 2 ;;
       --deliver) [ $# -ge 2 ] || die "--deliver needs a directory"; deliver=$2; shift 2 ;;
       -h|--help) usage; return 0 ;;
       *) die "unknown option for catchup: $1" ;;
     esac
   done
 
-  [ -d "$posts_dir" ] || die "no posts/ directory at $room (run: $0 init)"
+  use_room "$room_opt"
+  [ -d "$posts_dir" ] || die "no posts/ in room $room (run: $0 join $room)"
 
   local me; me=$(resolve_name "$as")
-  local cursor_file="$seen_dir/$me" cursor=
+  local cursor_file="$seen_dir/$room/$me" cursor=
   [ -r "$cursor_file" ] && cursor=$(head -n 1 -- "$cursor_file" | tr -d '[:space:]')
 
   if [ -n "$deliver" ]; then
@@ -454,13 +595,13 @@ cmd_catchup() {
   # divergent copies reconcile on posts/ alone.
   local cursor_written=0
   if [ -n "$newest" ] && [ "$newest" != "$cursor" ]; then
-    if mkdir -p -- "$seen_dir" 2>/dev/null && printf '%s\n' "$newest" > "$cursor_file" 2>/dev/null; then
+    if mkdir -p -- "$seen_dir/$room" 2>/dev/null && printf '%s\n' "$newest" > "$cursor_file" 2>/dev/null; then
       cursor_written=1
     else
       # A board reachable read-only is a normal way to run: delivery is still
       # correct, because delivered filenames carry the post id.
       printf 'moot: cannot write %s (read-only moot); nothing was delivered twice anyway\n' \
-        ".moot/seen/$me" >&2
+        ".moot/seen/$room/$me" >&2
     fi
   fi
 
@@ -469,8 +610,9 @@ cmd_catchup() {
     for id in ${delivered[@]+"${delivered[@]}"}; do
       list="$list$sep\"$(json_escape "$id")\""; sep=,
     done
-    printf '{"schema_version":1,"command":"catchup","ok":true,"changed":%s,"sender":"%s","since":%s,"cursor":%s,"cursor_written":%s,"scanned":%s,"delivered":[%s]}\n' \
+    printf '{"schema_version":1,"command":"catchup","ok":true,"changed":%s,"room":"%s","sender":"%s","since":%s,"cursor":%s,"cursor_written":%s,"scanned":%s,"delivered":[%s]}\n' \
       "$([ ${#delivered[@]} -gt 0 ] || [ "$cursor_written" = 1 ] && echo true || echo false)" \
+      "$(json_escape "$room")" \
       "$(json_escape "$me")" \
       "$([ -n "$cursor" ] && printf '"%s"' "$(json_escape "$cursor")" || printf null)" \
       "$([ -n "$newest" ] && printf '"%s"' "$(json_escape "$newest")" || printf null)" \
@@ -491,6 +633,8 @@ cmd_catchup() {
 
 case ${1:-help} in
   init) shift; cmd_init "$@" ;;
+  join) shift; cmd_join "$@" ;;
+  rooms) shift; cmd_rooms "$@" ;;
   post) shift; cmd_post "$@" ;;
   read) shift; cmd_read "$@" ;;
   catchup) shift; cmd_catchup "$@" ;;

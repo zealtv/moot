@@ -1,27 +1,32 @@
 #!/usr/bin/env bash
 #
-# Install moot into a directory, making you a participant in it.
+# Install moot into a directory, making it a moot participant.
 #
-#   ./install.sh /path/to/room
+#   ./install.sh /path/to/dir
 #
-# Copies moot.sh and README.md into <room>/.moot/, then runs init. The room is
-# the folder itself and holds only posts/; .moot/ is this participant's own
-# state, and the deployed moot.sh operates on the .moot/ it lives in.
+# Copies moot.sh and README.md into <dir>/.moot/, then runs init. Everything
+# moot needs lives under .moot/ — the rooms it holds and this participant's
+# read state — so .moot/ sits beside .loom/ and .gremlin/ and claims nothing
+# of the directory it is in.
 #
-# Into an empty folder this creates the room, because init creates posts/.
+# This creates no room: init no longer knows which one. Join a room after
+# installing:
+#
+#   <dir>/.moot/moot.sh join board
 
 set -euo pipefail
 
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-room=${1:-$PWD}
+host=${1:-$PWD}
 
-[ -d "$room" ] || { printf 'install: no such directory: %s\n' "$room" >&2; exit 1; }
-room=$(cd -- "$room" && pwd)
+[ -d "$host" ] || { printf 'install: no such directory: %s\n' "$host" >&2; exit 1; }
+host=$(cd -- "$host" && pwd)
 
-mkdir -p -- "$room/.moot"
-cp -- "$source_dir/moot.sh" "$room/.moot/moot.sh"
-cp -- "$source_dir/README.md" "$room/.moot/README.md"
-chmod +x "$room/.moot/moot.sh"
+mkdir -p -- "$host/.moot"
+cp -- "$source_dir/moot.sh" "$host/.moot/moot.sh"
+cp -- "$source_dir/README.md" "$host/.moot/README.md"
+chmod +x "$host/.moot/moot.sh"
 
-"$room/.moot/moot.sh" init
-printf 'installed moot into %s/.moot\n' "$room"
+"$host/.moot/moot.sh" init >/dev/null
+printf 'installed moot into %s/.moot\n' "$host"
+printf 'join a room with: %s/.moot/moot.sh join <room>\n' "$host"
