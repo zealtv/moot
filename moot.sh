@@ -79,23 +79,17 @@ moot_name() {
 
 # .gremlin/name is a key=value file (name=tengu, source=generated), so take the
 # field rather than the line. An older bare-name file has no =, and still
-# resolves. Searched upward from the working directory, because a gremlin runs
-# catchup from its own repo root while the room lives somewhere else.
+# resolves. Read as a sibling of .moot/, the way every other primitive in the
+# family reads its neighbours: a fixed path from the script's own location, so
+# the answer does not depend on the working directory and no stray .gremlin/ in
+# some ancestor can be picked up by accident. A .moot/ with no .gremlin/ beside
+# it is not part of a gremlin, and the rest of the chain is the honest answer.
 gremlin_name() {
-  local dir file value
-  dir=$PWD
-  while :; do
-    file="$dir/.gremlin/name"
-    if [ -r "$file" ]; then
-      value=$(sed -n 's/^name=//p' "$file" | head -n 1 | tr -d '[:space:]')
-      [ -n "$value" ] || value=$(head -n 1 -- "$file" | tr -d '[:space:]')
-      printf '%s' "$value"
-      return 0
-    fi
-    [ "$dir" = / ] && break
-    dir=$(dirname -- "$dir")
-  done
-  return 1
+  local file="$moot_dir/../.gremlin/name" value
+  [ -r "$file" ] || return 1
+  value=$(sed -n 's/^name=//p' "$file" | head -n 1 | tr -d '[:space:]')
+  [ -n "$value" ] || value=$(head -n 1 -- "$file" | tr -d '[:space:]')
+  printf '%s' "$value"
 }
 
 # A path segment written by this tool has to be filename-safe, whether it names

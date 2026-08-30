@@ -303,13 +303,37 @@ check 'init --as writes .moot/name' "$(cat "$room/.moot/name")" 'chosen'
 ( cd "$work" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
 check 'and posting picks it up' "$(sender_of "$room")" 'chosen'
 
-# A gremlin posts under its own name, not its folder's, and finds that name by
-# walking up from where it is working.
+# A gremlin posts under its own name, not its folder's. .gremlin/ is a sibling
+# of .moot/, so the name resolves from the script's own location and the
+# working directory does not come into it.
 room=$(new_room)
 mkdir -p "$room/.gremlin" "$room/deep/nested"
 printf 'name=fanta\n' > "$room/.gremlin/name"
 ( cd "$room/deep/nested" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
-check '.gremlin/name is found from a subdirectory' "$(sender_of "$room")" 'fanta'
+check 'the sibling .gremlin/name resolves from a subdirectory' "$(sender_of "$room")" 'fanta'
+room=$(new_room)
+mkdir -p "$room/.gremlin"
+printf 'name=fanta\n' > "$room/.gremlin/name"
+( cd / && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
+check 'and from outside the host entirely' "$(sender_of "$room")" 'fanta'
+
+# A .gremlin/ somewhere above the host is not this participant's gremlin.
+outer=$(mktemp -d "$work/outer.XXXXXX")
+mkdir -p "$outer/.gremlin"
+printf 'name=notmine\n' > "$outer/.gremlin/name"
+inner="$outer/host"; mkdir -p "$inner"
+"$repo/install.sh" "$inner" >/dev/null
+"$inner/.moot/moot.sh" join board >/dev/null
+( cd "$inner" && MOOT_NAME= USER=username "$inner/.moot/moot.sh" post -m 'x' >/dev/null )
+check 'an ancestor .gremlin/name is not a sibling' "$(sender_of "$inner")" 'username'
+
+# The wiring line a gremlin host runs is relative, from the host root.
+room=$(new_room)
+mkdir -p "$room/.gremlin" "$room/.nest/in"
+printf 'name=fanta\n' > "$room/.gremlin/name"
+printf '@fanta over to you\n' > "$room/.moot/rooms/board/posts/20260829-100000-bob.md"
+( cd "$room" && MOOT_NAME= USER=username ./.moot/moot.sh catchup --deliver .nest/in/ >/dev/null )
+check 'the relative wiring line delivers' "$(ls "$room/.nest/in" | wc -l | tr -d ' ')" '1'
 
 room=$(new_room)
 ( cd "$work" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
