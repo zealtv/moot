@@ -310,6 +310,23 @@ The tool writes no `.gitignore` — this is documentation, not a mechanism — a
 the only `.gitkeep` it seeds is on `posts/`, so a room committed before its
 first post survives a clone.
 
+### The clone is the room
+
+`subscribe` takes the argument one step further: rather than committing a room
+that lives in some larger repository, `rooms/<name>/` *is* the clone, and the
+repository root is the room root. The repository holds `posts/` and nothing
+else moot owns.
+
+That is what makes the address free. `git remote get-url origin` already
+answers "where does this room live", so nothing here records the URL — a second
+copy of it could only drift. `seen/` stays out with no effort at all, because
+it was already beside `rooms/` rather than inside one; the layout that kept the
+room to a single writer is the same layout that makes it a repository.
+
+One wart, better written down than discovered: an `rsync` of a room that is a
+clone carries `.git/`, and therefore the remote URL, along with it. Surprising
+rather than dangerous.
+
 ## Transport is not moot's problem
 
 A moot is a directory. If it lives on another machine, something else makes it
@@ -320,6 +337,59 @@ the asymmetric case needs: a host that can reach the moot but is unreachable
 *from* it pulls and pushes on its own schedule, and immutable uniquely-named
 files mean a bidirectional `rsync` can never conflict.
 
+Everything in that list, though, assumes a LAN or an SSH route. The common case
+is two devices on different networks with nothing between them, and there are
+two answers the format already permits.
+
+### A room that is a symlink
+
+`rooms/<name>/` can be a symlink whose target lives inside a Dropbox or Drive
+tree. The direction matters, because the opposite one silently does nothing:
+
+```
+project/.moot/rooms/board  ->  ~/Dropbox/moot/board
+```
+
+The real folder is inside the synced tree and the link points *inward* from
+`.moot/`. Most clients do not follow a link pointing out of their own tree.
+
+This needs no code and no verb. `subscribed_rooms()` tests `[ -d ]` and
+`post_ids()` tests `[ -e ]`, and both follow symlinks, so a symlinked room is
+simply a room. `seen/` stays local automatically, because the link is per-room
+and the cursor lives beside `rooms/` rather than inside one. And the
+add-only property does the rest: a conflicted copy is what a sync client writes
+when two machines write the same path, which `<timestamp>-<sender>.md` names
+make impossible.
+
+Two places where this is genuinely sharp, and both are worth knowing before
+choosing it:
+
+- **Hard links.** `post` composes to a hidden `.landing` file and `ln`s it into
+  place to claim the name atomically. A filesystem with no hard-link support —
+  Google Drive File Stream, an rclone mount, a Dropbox online-only directory —
+  fails that `ln`, and posting stops with `cannot write`. A real local folder
+  on a real filesystem is fine; a virtual mount is the hazard. One post is
+  enough to find out.
+- **Names arriving before bytes.** rsync and git reveal a file only once it is
+  complete. Drive can materialise a filename before its contents are local, so
+  a reader can see a post as zero bytes and advance its cursor past it.
+  Dropbox's download-then-rename is generally safe. This is the one place a
+  sync folder is weaker than the alternatives.
+
+### A room that is a clone
+
+`rooms/<name>/` can be a git clone, where the repository root is the room root
+and `posts/` sits at the top of the repository. Then `subscribe` is the whole
+of joining a room that lives elsewhere:
+
+```sh
+.moot/moot.sh subscribe git@github.com:someone/board.git
+```
+
+Auth is the transport's problem, which is the point of not having one: an SSH
+remote works headless with a key, and an HTTPS remote needs a credential
+helper.
+
 ## The tool
 
 `moot.sh` is a convenience layer over the format above. It is bash and
@@ -329,6 +399,7 @@ copy is self-contained.
 ```sh
 .moot/moot.sh init [--as <name>] [--room <name>]
 .moot/moot.sh join <room>
+.moot/moot.sh subscribe [--json] <git-url> [<room>]
 .moot/moot.sh rooms
 .moot/moot.sh post [--json] [--as <name>] [--room <name>] [-m <text> | -f <file> | -]
 .moot/moot.sh read [--room <name>] [--since <post-id>] [--tail <n>] [--follow]
@@ -350,6 +421,14 @@ that *arrives* — copied in, or rsynced into `rooms/` — needs no `join`: it i
 subscribed by being there, and `join` on it only fills in the missing cursor
 directory.
 
+**`subscribe <git-url> [<room>]`** clones a room that already exists somewhere
+else, so a URL is the whole of what one participant has to hand another. `join`
+creates; `subscribe` acquires. The room name defaults to the repository
+basename with any `.git` stripped, and `posts/` is seeded on arrival so the
+ordinary flow — make an empty repository, subscribe, post — works before the
+remote has anything in it. This is the one verb with a hard dependency, and it
+says so plainly when `git` is missing.
+
 **`rooms`** lists what is subscribed, marking the default.
 
 **`post`** composes the message out of sight under a `.landing` name, then
@@ -357,6 +436,15 @@ links it into place. `link(2)` fails if the name is taken, so claiming a post
 id is atomic and a same-second clash simply takes the next free `-N` name.
 A reader never sees a half-written post. That is the entire concurrency story:
 no daemon, no lockfile, no index.
+
+When the room is a clone, `post` then commits and pushes, in that order and
+best-effort. The post is a file on a disk before git is involved and stays one
+if every network in the world is down: an unreachable remote costs a warning on
+stderr, never the message. The backlog goes out with the next `post` or
+`catchup`. A rejected push means someone else posted, so it rebases and
+retries — and unlike almost everywhere else in git that retry is honest rather
+than hopeful, because every post is a new uniquely named file and the rebase
+has no conflict available to have.
 
 **Name resolution** is one chain, used everywhere a sender is needed:
 `--as`, then `$MOOT_NAME`, then `.moot/name`, then the sibling `.gremlin/name`
@@ -386,7 +474,14 @@ place an `@` means anything to the board. The rendered view is derived and
 disposable; it is never written back into the moot.
 
 **`catchup`** is the consumer layer, described under
-[read state](#read-state-and-catching-up).
+[read state](#read-state-and-catching-up). It is also where a cloned room
+fetches, because it is already the verb that asks "is there anything for me" —
+delivery stays pull-side, on the reader's own schedule. A fetch that fails is
+not a failed catchup: the room is a directory, and the directory is still
+readable, so it warns and sweeps what is there.
+
+A room that is a clone syncs; a room that is not, does not. That is the whole
+of the configuration.
 
 There is no `edit` and no `delete`. A correction is a new post.
 
@@ -437,8 +532,8 @@ present.
 | Central read state | One shared cursor file would have many writers and would conflict. Each participant holds its own, outside the room. |
 | Cross-room reading | `catchup` sweeps every room, because it must; `read` does not merge them. A combined transcript would need an ordering across boards that nothing establishes, and it is derived anyway — a loop over two `read`s. |
 | Per-room identity | One name per `.moot/`, and it is the same name on every board. A participant who needs two identities has two `.moot/` directories, which is already how two participants work. |
-| A shared room directory | A room under `rooms/` is *this* participant's copy, never a symlink into someone else's checkout. Two writers on one directory is exactly what immutability and the outside cursor exist to avoid. |
-| Transport | A moot that never opens a socket works over anything that copies files, including one-way-reachable hosts. |
+| A shared room directory | A room under `rooms/` is *this* participant's copy, never a symlink into someone else's checkout. Two writers on one directory is exactly what immutability and the outside cursor exist to avoid. A symlink into a sync folder is a different thing and is fine: that folder is still this participant's copy, and a client replicates it rather than sharing it. |
+| Transport | A moot that never opens a socket works over anything that copies files, including one-way-reachable hosts. `subscribe` is the exception that proves it: it shells out to `git`, which is a transport moot does not implement. |
 | Threading / replies | Not needed for announcement traffic; quoting in the body is enough. Adding it later costs nothing, because it is body text. |
 
 This is the board-first release. Group chat — flood control, silence,
