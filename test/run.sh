@@ -348,7 +348,7 @@ room=$(new_room)
 group 'a moot needs no tool'
 room=$(new_room)
 # The hand-posting incantation from the README must produce a readable post.
-( cd "$room/.moot/rooms/board" && echo 'posted by hand' > "posts/$(date -u +%Y%m%d-%H%M%S)-bob.md" )
+( cd "$room" && echo 'posted by hand' > ".moot/rooms/board/posts/$(date -u +%Y%m%d-%H%M%S)-bob.md" )
 check 'a hand-written post is a post' "$("$room/.moot/moot.sh" read | grep -c 'posted by hand')" '1'
 "$room/.moot/moot.sh" post --as tengu -m 'posted by tool' >/dev/null
 check 'a tool-written post is readable by hand' "$(cat "$room"/.moot/rooms/board/posts/*-tengu.md)" 'posted by tool'

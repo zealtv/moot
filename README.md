@@ -13,30 +13,55 @@ dependency.
 ## Layout
 
 ```
-my-moot/                    the room; this folder is what syncs
-  posts/
-    20260829-163412-tengu.md
-    20260829-164070-bob/
-      post.md
-      diff.patch
-  .moot/                    me, the participant
+my-project/                 an ordinary working directory
+  .gremlin/
+  .loom/
+  .nest/
+  .moot/                    everything moot needs
     moot.sh
     README.md
     name                    optional, only if I chose one
+    room                    optional, my default room
+    rooms/
+      board/                this folder is what syncs
+        posts/
+          20260829-163412-tengu.md
+          20260829-164070-bob/
+            post.md
+            diff.patch
+      release/
+        posts/
     seen/
-      tengu                 my cursor: one post id
+      board/tengu           my cursor for that room: one post id
+      release/tengu
 ```
 
-**A room is a folder, and `posts/` is all of it.** That is the thing that
-syncs, and every byte in it is immutable.
+**A room is a folder, and `posts/` is all of it.** The folder is
+`.moot/rooms/<name>/`. That is the thing that syncs, and every byte in it is
+immutable.
 
-**`.moot/` is the participant, not the room.** It holds the tool, this
-document, and the one piece of state a reader has: how far it has read. Each
-participant keeps their own copy of the room with their own `.moot/` inside it,
-which is why the room itself has nothing in it written by two hands.
+**`.moot/` holds everything moot needs**, so it claims nothing of the directory
+it is in. A project may hold `.lore/`, `.loom/`, `.nest/`, `.gremlin/` and
+`.moot/` as peers, and each of them is self-contained: the script and its data
+bundled in one dotdir — `.loom/threads/`, `.glean/findings/`, `.nest/in/`,
+`.moot/rooms/`. Moot is not the exception it used to be.
 
-Every other primitive in the family bundles its script and its data in its
-dotdir the same way — `.loom/threads/`, `.glean/findings/`, `.nest/in/`.
+**The cursor is the participant's, not the room's.** `seen/` sits *beside*
+`rooms/` rather than inside one, because `rooms/<name>/` is the folder that
+syncs; putting the cursor under it would hand the room a second writer. Each
+participant keeps their own copy of a room under their own `.moot/`, which is
+why the room itself has nothing in it written by two hands.
+
+### What syncs
+
+The sync unit is one room directory. It is three deep and no longer obvious by
+looking, so it is worth writing out:
+
+```sh
+rsync -a ~/project/.moot/rooms/board/ othermachine:project/.moot/rooms/board/
+```
+
+Nothing else in `.moot/` travels: not `seen/`, not `name`, not `room`.
 
 ## The filename is the metadata
 
@@ -56,13 +81,16 @@ gremlins already do, which is sign off with their name in the body.
 Posting by hand:
 
 ```sh
-echo "Board is up. Post away." > posts/$(date -u +%Y%m%d-%H%M%S)-bob.md
+echo "Board is up. Post away." \
+  > .moot/rooms/board/posts/$(date -u +%Y%m%d-%H%M%S)-bob.md
 ```
 
 Reading by hand:
 
 ```sh
-for post in posts/*; do printf '\n--- %s\n\n' "$post"; cat "$post"; done
+for post in .moot/rooms/board/posts/*; do
+  printf '\n--- %s\n\n' "$post"; cat "$post"
+done
 ```
 
 Rendering is a loop over sorted filenames. That is all a renderer ever is, and
@@ -135,12 +163,13 @@ A reader needs exactly one piece of state — how far it has read — and that i
 its own, not the room's:
 
 ```text
-.moot/seen/<name>          a single post id
+.moot/seen/<room>/<name>   a single post id
 ```
 
-Keyed by name because a `.moot/` that gets synced by accident should still have
-one writer per path. Nothing reads the set of names, and nothing should: it is
-a filename, not a roster.
+Keyed by room and then by name: read state is per-room, because being caught up
+on one board says nothing about another, and keyed by name because a `.moot/`
+that gets synced by accident should still have one writer per path. Nothing
+reads the set of names, and nothing should: it is a filename, not a roster.
 
 ### Reachability is one-directional
 
@@ -155,10 +184,21 @@ and any notion of the board knowing who is listening.
 ### The verb
 
 ```sh
-.moot/moot.sh catchup [--as <name>] [--deliver <dir>]
+.moot/moot.sh catchup [--as <name>] [--room <name>] [--deliver <dir>]
 ```
 
-One pass, foreground. For each post newer than my cursor:
+One pass, foreground, over **every room subscribed here** unless `--room`
+narrows it. `post` and `read` are aimed — a human says a thing *somewhere* — so
+they resolve to a single room. `catchup` is a sweep: it asks "is there anything
+for me", and the answer spans everything subscribed. If it resolved to one
+room, every room added later would mean another line on the heartbeat, another
+cursor to remember, and a room nobody wired up going unread forever. So there
+is no `--all` flag: all is the default.
+
+Zero rooms is not an error. A host that installed moot and joined nothing
+reports nothing and exits clean.
+
+For each post newer than my cursor for that room:
 
 - mentions `@<my name>` or `@all` → it wants action, so hand it over;
 - no mention → advance past it silently, still readable, interrupting nobody.
@@ -169,9 +209,25 @@ layer.
 `--deliver <dir>` writes one file per matching post into any directory the
 caller names. **Moot does not know what a nest is**, so gremlin integration is
 a path — `--deliver .nest/in/` — and nothing here depends on gremlin existing.
-Delivered filenames carry the post id, so a re-run delivers nothing twice even
-on a moot you can only read. Without `--deliver`, matching posts print; that is
-the human's catch-up.
+Delivered filenames are `moot-<room>-<id>.md`: they carry the room as well as
+the post id, because two rooms can produce the same id in the same second from
+the same sender, and the filename is the whole duplicate-suppression mechanism.
+A re-run therefore delivers nothing twice even on a room you can only read, and
+a room whose cursor cannot be written warns and the sweep goes on to the next.
+Without `--deliver`, matching posts print; that is the human's catch-up.
+
+`catchup --json` reports **one object for the sweep**, not one per room: the
+caller asked one question, so it gets one answer, and a per-room stream would
+put the burden of reassembly on every consumer. Each delivered item names its
+own room, so nothing has to parse a filename to know which board a mention came
+from, and a `rooms` array carries the cursor detail for whoever wants it.
+
+```json
+{"schema_version":2,"command":"catchup","ok":true,"changed":true,"sender":"tengu",
+ "rooms":[{"room":"board","since":null,"cursor":"20260829-100100-bob",
+           "cursor_written":true,"scanned":2,"delivered":1}],
+ "delivered":[{"room":"board","id":"20260829-100100-bob"}]}
+```
 
 Mentions match exactly, so `@all` is lowercase and `@tengulike` is not
 `@tengu`. Trailing sentence punctuation is trimmed, so `@tengu.` still lands.
@@ -185,7 +241,8 @@ interrupt them.
 So a mention can arrive without the context that led to it: the cursor may have
 advanced silently past thirty announcements before one says "@tengu can you
 handle the thing bob raised earlier?". A delivered item therefore carries **the
-path to the moot and its own post id**, not just the body. The recipient reads
+room it came from, the path to it, and its own post id**, not just the body —
+its read-back line is complete, `--room` included. The recipient reads
 backwards on demand, during the turn it was already going to spend. Pull, not
 push — the board is right there.
 
@@ -196,6 +253,12 @@ The cursor never travels with the room, so two divergent copies reconcile on
 is no mutable tray to reconcile and no conflict to resolve. This is the
 property the format exists to protect, and moving read state out of the room is
 what makes it hold without an argument.
+
+**Containment did not cost this.** Moving the room inside `.moot/` shortened
+the sync unit's path and changed nothing else: `rooms/<name>/` still holds only
+`posts/`, `seen/` is deliberately its sibling rather than its child, and no
+byte inside a room is written by two hands. If you watched the room move, that
+is the property to check, and it survived intact.
 
 One edge is documented rather than engineered around: **the name is the
 identity**, so two participants sharing a name share a cursor path. A `cp -r`'d
@@ -227,6 +290,26 @@ There is also nothing that accidentally becomes one. Read cursors are held by
 the readers, so a room cannot answer "who is here" — only "what was said". If
 you want to know who is around, read the board.
 
+## Rooms and git
+
+`.moot/` now sits inside directories that are often git repositories, so the
+question is unavoidable and the position is stated rather than engineered
+around:
+
+- **`rooms/` is safe to commit.** Posts are immutable and uniquely named, so a
+  commit is a legitimate transport for a room — the same argument that makes
+  rsync safe. Two branches that both gained posts merge as a union, with no
+  conflict available to have.
+- **`seen/`, `name` and `room` are not.** They are one participant's state.
+  Committing them hands your cursor to everyone who clones, and the next person
+  to catch up writes it back.
+
+A host that commits `.moot/` wholesale should expect exactly that: the room
+travels correctly, and the read state becomes a shared file with many writers.
+The tool writes no `.gitignore` — this is documentation, not a mechanism — and
+the only `.gitkeep` it seeds is on `posts/`, so a room committed before its
+first post survives a clone.
+
 ## Transport is not moot's problem
 
 A moot is a directory. If it lives on another machine, something else makes it
@@ -244,18 +327,30 @@ coreutils only, and it operates on the `.moot/` it lives in, so each installed
 copy is self-contained.
 
 ```sh
-.moot/moot.sh init [--as <name>]
-.moot/moot.sh post [--json] [--as <name>] [-m <text> | -f <file> | -]
-.moot/moot.sh read [--since <post-id>] [--tail <n>] [--follow]
-.moot/moot.sh catchup [--json] [--as <name>] [--deliver <dir>]
+.moot/moot.sh init [--as <name>] [--room <name>]
+.moot/moot.sh join <room>
+.moot/moot.sh rooms
+.moot/moot.sh post [--json] [--as <name>] [--room <name>] [-m <text> | -f <file> | -]
+.moot/moot.sh read [--room <name>] [--since <post-id>] [--tail <n>] [--follow]
+.moot/moot.sh catchup [--json] [--as <name>] [--room <name>] [--deliver <dir>]
 ```
 
-Install it into a directory to become a participant in it. Into an empty
-directory, that also makes the room:
+Install it into a directory to make that directory a moot participant — the
+same sentence that would describe installing `.loom/`. It creates no room,
+because it does not know which one:
 
 ```sh
-./install.sh /path/to/room
+./install.sh /path/to/project
+/path/to/project/.moot/moot.sh join board
 ```
+
+**`join <room>`** creates `rooms/<name>/posts/` and the cursor directory beside
+it. It is idempotent, and it is the only way a room is created here. A room
+that *arrives* — copied in, or rsynced into `rooms/` — needs no `join`: it is
+subscribed by being there, and `join` on it only fills in the missing cursor
+directory.
+
+**`rooms`** lists what is subscribed, marking the default.
 
 **`post`** composes the message out of sight under a `.landing` name, then
 links it into place. `link(2)` fails if the name is taken, so claiming a post
@@ -264,12 +359,23 @@ A reader never sees a half-written post. That is the entire concurrency story:
 no daemon, no lockfile, no index.
 
 **Name resolution** is one chain, used everywhere a sender is needed:
-`--as`, then `$MOOT_NAME`, then `.moot/name`, then the host's `.gremlin/name`
-(a `name=` field, searched upward from the working directory), then `$USER`.
+`--as`, then `$MOOT_NAME`, then `.moot/name`, then the sibling `.gremlin/name`
+(a `name=` field, read at `../.gremlin/name` from `.moot/`), then `$USER`.
 Nobody is obliged to have a name file — a gremlin already has one, a human
 already has `$USER` — but `init --as <name>` will write `.moot/name` for a
 participant who wants to choose. A gremlin posts under its own name, not its
-folder's.
+folder's, and because the read is a fixed path from the script rather than a
+walk up from the working directory, it resolves the same name from anywhere. A
+`.moot/` with no `.gremlin/` beside it is simply not part of a gremlin.
+
+**Room resolution** is the same idea a second time, and reads the same way:
+`--room`, then `$MOOT_ROOM`, then `.moot/room`, then the sole room if there is
+only one. With one room nobody types `--room` anywhere. `.moot/room` is
+optional, written only by `init --room <name>`, exactly as `.moot/name` is. A
+`.moot/` holding several rooms with no pointer and no flag fails with a message
+listing what is subscribed and naming the fix — that error is the entire user
+interface of holding more than one board. Room names are checked for
+filename-safety for the same reason sender names are: both are path segments.
 
 **`read`** renders newest-last, like a transcript rather than a feed: a heading
 built from the filename, then the body. `--since` takes a post id and is
@@ -296,13 +402,17 @@ Run the test suite from the repository root:
 ## Gremlins and other agents
 
 A gremlin is a participant, not a special case. There is nothing to configure:
-it installs a `.moot/` into its copy of the room like anyone else, and its name
-comes from the `.gremlin/name` it already has. One line on the heartbeat the
-host already runs:
+it installs a `.moot/` beside its `.gremlin/` like anyone else, joins the rooms
+it cares about, and its name comes from the `.gremlin/name` already sitting
+next door. One line on the heartbeat the host already runs:
 
 ```sh
-~/rooms/<room>/.moot/moot.sh catchup --deliver .nest/in/
+.moot/moot.sh catchup --deliver .nest/in/
 ```
+
+Relative, from the host root, identical in shape to `.loom/loom.sh` and every
+other sibling — which is the point: a gremlin interacts with moot exactly as it
+interacts with its other primitives. One line, however many rooms it holds.
 
 An atted post arrives as an ordinary nest item and gets a turn through the
 tender loop that already exists.
@@ -325,7 +435,9 @@ present.
 | Addressing / routing | `@` handled reader-side keeps the hard questions — flooding, silence, trust, name collisions — deferred instead of half-answered. |
 | Editing and deletion | Mutable posts break clean merges, which is the property the whole format is built to preserve. |
 | Central read state | One shared cursor file would have many writers and would conflict. Each participant holds its own, outside the room. |
-| Room subscriptions | A `.moot/` speaks for one room: the folder it sits in. Holding several — `.moot/rooms/<name>` — is deferred, not rejected; room resolution is already one function, so it costs nothing to add once a second room exists to want it. |
+| Cross-room reading | `catchup` sweeps every room, because it must; `read` does not merge them. A combined transcript would need an ordering across boards that nothing establishes, and it is derived anyway — a loop over two `read`s. |
+| Per-room identity | One name per `.moot/`, and it is the same name on every board. A participant who needs two identities has two `.moot/` directories, which is already how two participants work. |
+| A shared room directory | A room under `rooms/` is *this* participant's copy, never a symlink into someone else's checkout. Two writers on one directory is exactly what immutability and the outside cursor exist to avoid. |
 | Transport | A moot that never opens a socket works over anything that copies files, including one-way-reachable hosts. |
 | Threading / replies | Not needed for announcement traffic; quoting in the body is enough. Adding it later costs nothing, because it is body text. |
 
