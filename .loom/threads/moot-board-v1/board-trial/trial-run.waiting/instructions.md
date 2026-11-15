@@ -7,6 +7,10 @@ Lore record. This is the goal stitch's proof. Depends on [[trial-kit]].
 own hosts, a human, and real coordination that was going to happen anyway.
 Waiting until those exist.
 
+A sibling, [[orchestrator-room]], brings real coordination sooner: concurrent
+orchestrators sharing one usage budget (bopOS and easyhog, 2026-11-15). Its
+findings count as trial evidence; fold them into the Lore record.
+
 ## Run it
 
 Follow `../trial-kit/setup.md`. Use it for work that was going to happen

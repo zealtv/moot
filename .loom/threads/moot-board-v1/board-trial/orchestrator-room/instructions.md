@@ -2,8 +2,10 @@
 
 **Intent.** Give orchestrators running at the same time on one machine (and
 one usage account) a shared moot room for load-balancing, so each sees what
-the others are spending and running before it dispatches. Not queued; Bob
-asked for the draft on 2026-11-15.
+the others are spending and running before it dispatches. Bob asked for the
+draft on 2026-11-15 and, the same day, for it to sit under board-trial as part
+of the trial ("it overlaps with the trial run and should be linked/
+integrated"). Not queued.
 
 ## Where this came from (as of 2026-11-15)
 
@@ -25,6 +27,29 @@ asked for the draft on 2026-11-15.
 - `catchup --deliver .nest/in/` turns an `@name` post into a nest item, so
   the "watch your nest" habit keeps working for direct requests.
 - Immutable posts: the room doubles as the record of the experiment.
+
+## Usage readings without tripping rate limits
+
+Bob, 2026-11-15: "with multiple agents checking usage they sometimes trip rate
+limiting. we might want a more universal system for that. moot might help."
+As of then, ai-kit's `claude-usage` and `codex-usage` had no cache or lock, and
+every `pane-watch` polled on its own (`claude-usage` every ~4 min); ai-kit's
+`harness-lessons.md` records HTTP 429s from `claude-usage` when polled often
+(qtable 2026-10-16, glra-midi 2026-11-13).
+
+Two layers to weigh, likely both:
+
+- **Machine-local, in ai-kit's tools:** one shared cache of the last reading
+  with its time (e.g. under `~/.cache/ai-kit/`), served to any caller while
+  fresh, with a lock so only one caller fetches at a time. That fixes every
+  caller at once, orchestrators or not, and needs no moot. It would be an
+  ai-kit stitch.
+- **In the room:** whoever fetched posts the reading, so other participants,
+  including ones on other machines, read it from the
+  room instead of fetching. Readings in posts carry their own time, so a
+  reader can judge staleness. Weigh whether a usage post every few minutes
+  floods the board; a separate `usage` room may fit better than the `runs`
+  room.
 
 ## To settle
 
@@ -50,12 +75,18 @@ asked for the draft on 2026-11-15.
    in the ai-kit orchestrate skill and a run-plan field (room, name,
    priority). That edit belongs in ai-kit, not here.
 
-## Relation to board-trial
+## Part of board-trial
 
-`moot-board-v1/board-trial/trial-run` has been waiting on "real coordination
-that was going to happen anyway". Two orchestrators sharing a budget looks
-like that, though with orchestrators, not fanta gremlins. If Bob agrees, run
-this as evidence for the trial too and fill in its `observations.md`.
+`trial-run` has been waiting on "real coordination that was going to happen
+anyway" between two fanta gremlins and a human. Two orchestrators sharing a
+budget, with Bob, is that kind of coordination, so this stitch runs as part of
+the trial: record the setup and what happens in `../trial-kit.tied/
+observations.md` alongside (or ahead of) the gremlin trial.
+
+Note: `../trial-kit.tied/setup.md` (as of `16007e6`) starts with every
+participant pointing at one shared `~/rooms/hq`, which the README's current
+rule against a shared room directory seems to rule out. Settle which holds
+before using the kit as written.
 
 ## Tie-off
 
