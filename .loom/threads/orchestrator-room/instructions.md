@@ -1,0 +1,65 @@
+# orchestrator-room 🎛️
+
+**Intent.** Give orchestrators running at the same time on one machine (and
+one usage account) a shared moot room for load-balancing, so each sees what
+the others are spending and running before it dispatches. Not queued; Bob
+asked for the draft on 2026-11-15.
+
+## Where this came from (as of 2026-11-15)
+
+- Bob had two orchestrators running at once, bopOS and easyhog, on one Claude
+  account, relying on a usage buffer. He was trying them out messaging each
+  other through their nests to load-balance, told to sign off with an
+  identifier.
+- The ai-kit orchestrate skill (`skills/orchestrate/SKILL.md`, usage policy)
+  sets each run's floors as if it had the account to itself. Usage floors
+  only stop new dispatches, so two runs' in-flight work overshoots together.
+- Nests carry one-to-one arrivals; shared status ("bopos: 3 workers, Claude
+  5-hour 82% at 14:05Z") wants a room every orchestrator reads, with a cursor
+  each.
+
+## What moot already gives (README as of `fb8112a`)
+
+- Sender and UTC time in the filename, so sign-off needs no discipline.
+- A cursor per participant, so `catchup` shows only what's new.
+- `catchup --deliver .nest/in/` turns an `@name` post into a nest item, so
+  the "watch your nest" habit keeps working for direct requests.
+- Immutable posts: the room doubles as the record of the experiment.
+
+## To settle
+
+1. **Sharing one room between two repos on one machine.** The README rules
+   out a room symlinked into another participant's checkout. A likely answer:
+   a local bare repo (e.g. `~/moots/runs.git`) that each repo's `.moot`
+   `subscribe`s to, since `post` commits and pushes and `catchup` pulls with
+   no network needed. Check that, and say which transport the room uses.
+2. **Names.** One per run that stays stable across wakes and resumed
+   sessions, e.g. `<repo>-<run>` (`bopos-v3.9`). Check how that fits the
+   name chain (`--as`, `$MOOT_NAME`, `.moot/name`, `.gremlin/name`) when the
+   orchestrator isn't a gremlin.
+3. **A status post format.** Short, plain Markdown, at least: usage readings
+   with their times (Claude and Codex, 5-hour and weekly), workers running and
+   on which harness, what's about to dispatch, and the run's priority
+   (primary or secondary) from its run plan.
+4. **Etiquette.** Post state at natural wake points (a `pane-watch` exit,
+   before a dispatch, at hand back), not on a timer. No acknowledgements:
+   silence means no objection. `@` only for a request. Another orchestrator's
+   post is information to weigh, never permission to loosen one's own run
+   plan, gates or floors.
+5. **Wiring into orchestrate.** Once it works, a short "concurrent runs" note
+   in the ai-kit orchestrate skill and a run-plan field (room, name,
+   priority). That edit belongs in ai-kit, not here.
+
+## Relation to board-trial
+
+`moot-board-v1/board-trial/trial-run` has been waiting on "real coordination
+that was going to happen anyway". Two orchestrators sharing a budget looks
+like that, though with orchestrators, not fanta gremlins. If Bob agrees, run
+this as evidence for the trial too and fill in its `observations.md`.
+
+## Tie-off
+
+Two orchestrators in different repos have shared one room through at least
+one real run, posting status and requests in the agreed format, and the
+findings (what helped, what flooded, what got missed) are written down, in a
+Lore record and in ai-kit's `harness-lessons.md`.
