@@ -353,6 +353,29 @@ check 'and says why' "$(printf '%s' "$err" | grep -c 'clock is not moving')" '1'
 check 'and leaves no landing file behind' "$(ls -A "$posts" | grep -c landing)" '0'
 check 'and claims nothing' "$(ls "$posts" | wc -l | tr -d ' ')" '1'
 
+# Only a clock that stays put counts against the retries. Seven earlier posts
+# under the same name, and a clock that moves a second each time: the post
+# must wait its way past all of them rather than give up after five.
+room=$(new_room)
+posts="$room/.moot/rooms/board/posts"
+for t in 12 13 14 15 16 17 18; do printf 'earlier %s\n' "$t" > "$posts/20260829-1634$t-tengu.md"; done
+step_date 20260829-163412 20260829-163413 20260829-163414 20260829-163415 20260829-163416 20260829-163417 20260829-163418 20260829-163419
+"$room/.moot/moot.sh" post --as tengu -m 'late but landed' >/dev/null; rc=$?
+thaw_step
+check 'a post that waits more than five seconds still lands' "$rc" '0'
+check 'and lands on the first free second' "$(cat "$posts/20260829-163419-tengu.md" 2>/dev/null)" 'late but landed'
+
+# A burst, on the real clock: four posts under one name at once. Each takes the
+# next free second, and every body lands.
+room=$(new_room)
+posts="$room/.moot/rooms/board/posts"
+for i in 1 2 3 4; do "$room/.moot/moot.sh" post --as tengu -m "burst $i" >/dev/null 2>"$work/burst.$i.err" & done
+wait
+check 'four concurrent posts under one name all land' "$(ls "$posts"/*.md | wc -l | tr -d ' ')" '4'
+check 'and each body is there' "$(cat "$posts"/*.md | sort | tr '\n' ' ')" 'burst 1 burst 2 burst 3 burst 4 '
+check 'and none of them died' "$(cat "$work"/burst.*.err | wc -c | tr -d ' ')" '0'
+check 'and no landing file is left' "$(ls -A "$posts" | grep -c landing)" '0'
+
 # -N posts from before the change still read and catch up in order, once.
 room=$(new_room)
 posts="$room/.moot/rooms/board/posts"
@@ -757,7 +780,7 @@ check 'and the dotdirs are peers' "$(ls -A "$host" | tr '\n' ' ')" '.loom .moot 
 # folder that syncs is posts/, and nothing in it is written by two hands.
 group 'two participants'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }
-m post --as bob -m '@tengu morning' >/dev/null
+printf '@tengu morning\n' > "$room/.moot/rooms/board/posts/20260829-090000-bob.md"
 twin="$work/twin"; rm -rf "$twin"; cp -r "$room" "$twin"
 m catchup --as bob >/dev/null
 "$twin/.moot/moot.sh" catchup --as tengu >/dev/null
@@ -765,6 +788,7 @@ m catchup --as bob >/dev/null
 [ -e "$twin/.moot/seen/board/bob" ] && no 'the other copy holds only its own cursor' || ok 'the other copy holds only its own cursor'
 "$twin/.moot/moot.sh" post --as tengu -m 'on it' >/dev/null
 before=$(cat "$room/.moot/seen/board/bob")
+check 'the first catchup did write a cursor to compare against' "$before" '20260829-090000-bob'
 rsync -a "$twin/.moot/rooms/board/posts/" "$room/.moot/rooms/board/posts/"; rsync -a "$room/.moot/rooms/board/posts/" "$twin/.moot/rooms/board/posts/"
 check 'the rooms reconcile on posts/ alone' "$(ls "$room/.moot/rooms/board/posts"/*.md | wc -l | tr -d ' ')" '2'
 check 'syncing the room leaves the cursor alone' "$(cat "$room/.moot/seen/board/bob")" "$before"
@@ -807,6 +831,60 @@ out_b=$(b catchup --json)
 check 'the other repo still gets its own mentions' "$(printf '%s' "$out_b" | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":2'
 check 'and a second sweep delivers nothing twice' "$(b catchup --json | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":0'
 
+group 'a sweep leaves the current second for the next'
+# A post can land in the second a sweep reads, under a name that sorts below the
+# cursor's (bob after easyhog). If the cursor moved onto that second, the late
+# post would be skipped for good. The stubbed clock stands at the second
+# being swept; a sweep leaves that second alone.
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+say 20260829-095959-easyhog 'settled earlier'
+say 20260829-100000-easyhog '@tengu same second, sorts last'
+freeze_date 20260829-100000
+out=$(m catchup --json --as tengu)
+check 'catchup scans only what is settled' "$(printf '%s' "$out" | grep -o '"scanned":[0-9]*')" '"scanned":1'
+check 'and parks the cursor on the last settled post' "$(cat "$room/.moot/seen/board/tengu")" '20260829-095959-easyhog'
+check 'and reports that cursor' "$(printf '%s' "$out" | grep -o '"cursor":"[^"]*"')" '"cursor":"20260829-095959-easyhog"'
+say 20260829-100000-bob '@tengu same second, sorts first'
+thaw_date; freeze_date 20260829-100001
+out=$(m catchup --json --as tengu)
+check 'the next sweep delivers both same-second posts' "$(printf '%s' "$out" | grep -o '"delivered":\[[^]]*\]')" \
+  '"delivered":[{"room":"board","id":"20260829-100000-bob"},{"room":"board","id":"20260829-100000-easyhog"}]'
+check 'and moves the cursor onto them' "$(cat "$room/.moot/seen/board/tengu")" '20260829-100000-easyhog'
+check 'and a third sweep finds nothing' "$(m catchup --json --as tengu | grep -o '"scanned":[0-9]*')" '"scanned":0'
+thaw_date
+
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+say 20260829-100000-easyhog 'first, same second'
+freeze_date 20260829-100000
+check 'read --new shows nothing from the current second' "$(m read --new --as tengu)" 'nothing new for tengu'
+[ -e "$room/.moot/seen/board/tengu" ] && no 'and writes no cursor' || ok 'and writes no cursor'
+say 20260829-100000-bob 'second, sorts first'
+thaw_date; freeze_date 20260829-100001
+out=$(m read --new --as tengu)
+check 'the next read --new shows both' "$(printf '%s' "$out" | grep -c -e 'first, same second' -e 'second, sorts first')" '2'
+check 'in post-id order' "$(printf '%s' "$out" | grep -e 'first, same' -e 'second, sorts' | tr '\n' '|')" 'second, sorts first|first, same second|'
+check 'and the heading counts them' "$(printf '%s' "$out" | grep -c '══ board · 2 new ══')" '1'
+thaw_date
+
+# Each sweep reads the clock once, so a sweep that finds everything settled
+# terminates with the usual report; stamps from a clock ahead of mine wait too.
+room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+say 20260829-100000-bob 'now'
+say 20260829-100500-bob 'five minutes ahead of my clock'
+freeze_date 20260829-100000
+check 'a post stamped later than my clock is not swept yet' "$(m catchup --json --as tengu | grep -o '"scanned":[0-9]*')" '"scanned":0'
+thaw_date
+out=$(m catchup --json --as tengu)
+check 'and is swept once the clock has passed it' "$(printf '%s' "$out" | grep -o '"scanned":[0-9]*')" '"scanned":2'
+# A stray file that is not a stamp never moves the cursor (it would sort after
+# every stamp, and park the cursor beyond every later post).
+say README 'not a post'
+say 20260829-100600-bob 'real post'
+out=$(m read --new --as tengu)
+check 'a non-stamp file is not swept' "$(printf '%s' "$out" | grep -c 'not a post')" '0'
+check 'and does not hide the post after it' "$(printf '%s' "$out" | grep -c 'real post')" '1'
+check 'because the cursor stays on the last stamp' "$(cat "$room/.moot/seen/board/tengu")" '20260829-100600-bob'
+
 # ---------------------------------------------------------------- local time
 
 group 'read headings are in local time'
@@ -815,12 +893,60 @@ posts="$room/.moot/rooms/board/posts"
 printf 'late\n' > "$posts/20260828-233000-tengu.md"
 head_of() { "$room/.moot/moot.sh" read | grep -m1 '──'; }
 # POSIX zone strings, so the test needs no zoneinfo: XXX-11 is UTC+11.
-case $(TZ=XXX-11 head_of) in *'2026-08-29 10:30:00 +1100 · tengu'*) ok 'a +1100 reader sees the next day, 10:30' ;; *) no 'a +1100 reader sees the next day, 10:30' "$(TZ=XXX-11 head_of)" ;; esac
-case $(TZ=XXX+5 head_of) in *'2026-08-28 18:30:00 -0500 · tengu'*) ok 'a -0500 reader sees 18:30 the same day' ;; *) no 'a -0500 reader sees 18:30 the same day' "$(TZ=XXX+5 head_of)" ;; esac
-case $(TZ=XXX-11 head_of) in *UTC*) no 'a local heading does not say UTC' ;; *) ok 'a local heading does not say UTC' ;; esac
+heading_checks() {
+  local label=$1
+  case $(TZ=XXX-11 head_of) in *'2026-08-29 10:30:00 +1100 · tengu'*) ok "$label: a +1100 reader sees the next day, 10:30" ;; *) no "$label: a +1100 reader sees the next day, 10:30" "$(TZ=XXX-11 head_of)" ;; esac
+  case $(TZ=XXX+5 head_of) in *'2026-08-28 18:30:00 -0500 · tengu'*) ok "$label: a -0500 reader sees 18:30 the same day" ;; *) no "$label: a -0500 reader sees 18:30 the same day" "$(TZ=XXX+5 head_of)" ;; esac
+  case $(TZ=XXX-11 head_of) in *UTC*) no "$label: a local heading does not say UTC" ;; *) ok "$label: a local heading does not say UTC" ;; esac
+}
+heading_checks 'native date'
 [ -e "$posts/20260828-233000-tengu.md" ] && ok 'the filename stays UTC' || no 'the filename stays UTC'
+
+# The other flavour of date, when this machine has one: GNU date as gdate on
+# macOS, or the reverse is not testable (a Linux box has no BSD date to shim).
+if command -v gdate >/dev/null 2>&1; then
+  mkdir -p "$work/gnu"; ln -sf "$(command -v gdate)" "$work/gnu/date"
+  PATH="$work/gnu:$PATH"
+  heading_checks 'GNU date'
+  PATH=${PATH#"$work/gnu:"}
+else
+  printf '  skip GNU date headings (no gdate here to shim as date)\n'
+fi
+
+# One date fork per heading, whichever flavour. A wrapper logs each call and
+# runs the real date; five posts may cost one probe or two plus five headings.
+fork_count() {
+  mkdir -p "$work/count"
+  printf '#!/bin/sh\necho x >> "%s/calls"\nexec "%s" "$@"\n' "$work/count" "$(command -v date)" > "$work/count/date"
+  chmod +x "$work/count/date"; rm -f "$work/count/calls"
+  PATH="$work/count:$PATH"
+  "$room/.moot/moot.sh" read >/dev/null
+  PATH=${PATH#"$work/count:"}
+  wc -l < "$work/count/calls" | tr -d ' '
+}
+room=$(new_room)
+posts="$room/.moot/rooms/board/posts"
+for t in 100000 100100 100200 100300 100400; do printf 'x\n' > "$posts/20260829-$t-tengu.md"; done
+calls=$(fork_count)
+[ "$calls" -le 7 ] && ok "five headings cost $calls date forks (one each, plus at most two probes)" || no 'five headings cost one date fork each' "$calls forks"
+if command -v gdate >/dev/null 2>&1; then
+  PATH="$work/gnu:$PATH"; calls=$(fork_count); PATH=${PATH#"$work/gnu:"}
+  [ "$calls" -le 7 ] && ok "GNU date: five headings cost $calls date forks" || no 'GNU date: five headings cost one date fork each' "$calls forks"
+fi
+
+# A name in posts/ that is not a stamp shows as itself, not as a garbled time.
+room=$(new_room)
+posts="$room/.moot/rooms/board/posts"
 printf 'odd\n' > "$posts/notastamp-tengu.md"
-case $("$room/.moot/moot.sh" read --tail 1 | grep -m1 '──') in *' UTC · tengu'*) ok 'an id that is not a stamp falls back to UTC, not an error' ;; *) no 'an id that is not a stamp falls back to UTC, not an error' ;; esac
+printf 'readme\n' > "$posts/README.md"
+out=$("$room/.moot/moot.sh" read)
+check 'a non-stamp id is its own heading' "$(printf '%s' "$out" | grep '──' | tr '\n' '|')" '── README ──|── notastamp-tengu ──|'
+printf 'real\n' > "$posts/20260828-233000-tengu.md"
+check 'a stamped post beside them still gets a time and a sender' \
+  "$(printf '%s' "$("$room/.moot/moot.sh" read)" | grep -c '· tengu ──')" '1'
+# A well-formed stamp that is not a real time keeps the UTC label.
+printf 'impossible\n' > "$posts/20261399-250000-tengu.md"
+case $("$room/.moot/moot.sh" read | grep '──') in *'2026-13-99 25:00:00 UTC · tengu'*) ok 'a stamp that is not a time falls back to UTC, not an error' ;; *) no 'a stamp that is not a time falls back to UTC, not an error' ;; esac
 
 # ---------------------------------------------------------------- read --new
 

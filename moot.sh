@@ -232,6 +232,24 @@ post_body_path() {
   fi
 }
 
+# What a sweep (catchup, read --new) may read: stamped ids in order, leaving out
+# any stamped in the current UTC second or later. The cursor is the newest id
+# scanned, so a sweep that moved it onto the current second would never show a
+# post that lands later in that same second under a name sorting lower (bob
+# after easyhog). Such a post waits for the next sweep, and so does one stamped
+# by a clock ahead of mine. $sweep_now is read once per sweep. Ids that are not
+# stamps are not swept: sorting after every stamp, one would park the cursor
+# past every post still to come.
+sweep_now=
+settled_ids() {
+  local id
+  while IFS= read -r id; do
+    is_stamp_id "$id" || continue
+    [ "${id:0:15}" \< "$sweep_now" ] || continue
+    printf '%s\n' "$id"
+  done < <(post_ids)
+}
+
 # ---------------------------------------------------------------- init
 
 cmd_init() {
@@ -524,7 +542,9 @@ cmd_post() {
   # same-second clash with my own earlier post, wait for the next second and
   # stamp again: the filename stays <date>-<time>-<sender>.md, so lexical
   # order is still the order things were written. A directory post of the
-  # same id counts as taken too.
+  # same id counts as taken too. Only a clock that stays on the same stamp
+  # counts against the retries: a burst of posts under one name each wait their
+  # turn, a second apart, and every one of them lands.
   n=0
   while :; do
     base="$stamp-$sender"
@@ -534,10 +554,15 @@ cmd_post() {
     fi
     [ -e "$target" ] || [ -e "$posts_dir/$base" ] \
       || { rm -f -- "$landing"; die "cannot write $target"; }
-    n=$((n + 1))
-    [ "$n" -le 5 ] || { rm -f -- "$landing"; die "cannot claim a post name: the clock is not moving"; }
     sleep 1
+    local prev=$stamp
     stamp=$(date -u +%Y%m%d-%H%M%S)
+    if [ "$stamp" = "$prev" ]; then
+      n=$((n + 1))
+      [ "$n" -le 5 ] || { rm -f -- "$landing"; die "cannot claim a post name: the clock is not moving"; }
+    else
+      n=0
+    fi
   done
   rm -f -- "$landing"
 
@@ -586,34 +611,65 @@ render_body() {
   fi
 }
 
+# Does this id follow the filename grammar, <8 digits>-<6 digits>-<sender>? Only
+# such ids have a time to show, and only such ids are swept by catchup and
+# read --new; anything else in posts/ (a stray README.md, say) is still listed
+# by plain read, under its own name.
+is_stamp_id() {
+  case $1 in
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-?*) return 0 ;;
+  esac
+  return 1
+}
+
+# Which `date` this machine has, found once per run: GNU takes -d, BSD takes
+# -j -f. A heading used to try both on every post, four forks each on BSD.
+date_flavour=
+pick_date_flavour() {
+  [ -z "$date_flavour" ] || return 0
+  if date -d '1970-01-01 00:00:00 UTC' +%s >/dev/null 2>&1; then
+    date_flavour=gnu
+  elif date -j -f '%Y%m%d%H%M%S %z' '19700101000000 +0000' +%s >/dev/null 2>&1; then
+    date_flavour=bsd
+  else
+    date_flavour=none
+  fi
+}
+
 # "YYYY-MM-DD HH:MM:SS +ZZZZ" for a post's UTC day and time, in the reader's
-# own zone. Display only: the filename stays UTC, and nothing is written back.
-# GNU date takes -d, BSD date takes -j -f and -r; whichever answers wins, and a
-# date with neither (or an id that is not a stamp) falls back to the stamp as
-# written, labelled UTC, so a heading is never wrong, only less friendly.
+# own zone, left in $local_when. One date fork per call. Display only: the
+# filename stays UTC, and nothing is written back. A date with neither
+# flavour, or a stamp that is not a real time, returns non-zero and the caller
+# shows the stamp as written, labelled UTC, so a heading is never wrong, only
+# less friendly. Sets a variable rather than printing, so the flavour found
+# on the first call is still known on the second.
+local_when=
 local_stamp() {
-  local day=$1 time=$2 epoch out
+  local day=$1 time=$2 fmt='+%Y-%m-%d %H:%M:%S %z'
   case $day$time in *[!0-9]* | '') return 1 ;; esac
   [ ${#day} = 8 ] && [ ${#time} = 6 ] || return 1
-  epoch=$(date -u -d "${day:0:4}-${day:4:2}-${day:6:2} ${time:0:2}:${time:2:2}:${time:4:2}" +%s 2>/dev/null) \
-    || epoch=$(date -j -u -f '%Y%m%d%H%M%S' "$day$time" +%s 2>/dev/null) \
-    || return 1
-  out=$(date -d "@$epoch" '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null) \
-    || out=$(date -r "$epoch" '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null) \
-    || return 1
-  printf '%s' "$out"
+  pick_date_flavour
+  case $date_flavour in
+    gnu) local_when=$(date -d "${day:0:4}-${day:4:2}-${day:6:2} ${time:0:2}:${time:2:2}:${time:4:2} UTC" "$fmt" 2>/dev/null) || return 1 ;;
+    bsd) local_when=$(date -j -f '%Y%m%d%H%M%S %z' "$day$time +0000" "$fmt" 2>/dev/null) || return 1 ;;
+    *) return 1 ;;
+  esac
 }
 
 render_post() {
-  local id=$1 body dim reset day time sender rest when
-  day=${id%%-*}; rest=${id#*-}
-  time=${rest%%-*}; sender=${rest#*-}
+  local id=$1 body dim reset day time sender rest
   dim=''; reset=''
   if [ "$colour_on" = 1 ]; then dim=$(printf '\033[2m'); reset=$(printf '\033[0m'); fi
 
-  when=$(local_stamp "$day" "$time") \
-    || when="${day:0:4}-${day:4:2}-${day:6:2} ${time:0:2}:${time:2:2}:${time:4:2} UTC"
-  printf '\n%s── %s · %s ──%s\n\n' "$dim" "$when" "$sender" "$reset"
+  if is_stamp_id "$id"; then
+    day=${id%%-*}; rest=${id#*-}
+    time=${rest%%-*}; sender=${rest#*-}
+    local_stamp "$day" "$time" \
+      || local_when="${day:0:4}-${day:4:2}-${day:6:2} ${time:0:2}:${time:2:2}:${time:4:2} UTC"
+    printf '\n%s── %s · %s ──%s\n\n' "$dim" "$local_when" "$sender" "$reset"
+  else
+    printf '\n%s── %s ──%s\n\n' "$dim" "$id" "$reset"
+  fi
 
   body=$(post_body_path "$id")
   if [ -r "$body" ]; then
@@ -666,6 +722,7 @@ read_new() {
   fi
   me=$(resolve_name "$as")
   init_colour
+  sweep_now=$(date -u +%Y%m%d-%H%M%S)
 
   local head_on='' head_off=''
   if [ "$colour_on" = 1 ]; then head_on=$(printf '\033[1m'); head_off=$(printf '\033[0m'); fi
@@ -675,12 +732,11 @@ read_new() {
     [ -d "$posts_dir" ] || continue
     cursor=$(cursor_get "$room" "$me")
     local new=()
-    newest=
     while IFS= read -r id; do
-      newest=$id
       if [ -z "$cursor" ] || [ "$id" \> "$cursor" ]; then new+=("$id"); fi
-    done < <(post_ids)
+    done < <(settled_ids)
     [ ${#new[@]} -gt 0 ] || continue
+    newest=${new[${#new[@]}-1]}
 
     printf '\n%s══ %s · %s new ══%s\n' "$head_on" "$room" "${#new[@]}" "$head_off"
     for id in "${new[@]}"; do render_post "$id"; done
@@ -839,12 +895,11 @@ catchup_room() {
   local me=$1 deliver=$2 json=$3 id
   local cursor; cursor=$(cursor_get "$room" "$me")
 
-  local ids=() new=() newest=
-  while IFS= read -r id; do ids+=("$id"); done < <(post_ids)
-  for id in ${ids[@]+"${ids[@]}"}; do
-    newest=$id
+  local new=() newest=
+  while IFS= read -r id; do
     if [ -z "$cursor" ] || [ "$id" \> "$cursor" ]; then new+=("$id"); fi
-  done
+  done < <(settled_ids)
+  [ ${#new[@]} -gt 0 ] && newest=${new[${#new[@]}-1]}
 
   local mine=0
   for id in ${new[@]+"${new[@]}"}; do
@@ -860,11 +915,12 @@ catchup_room() {
     mine=$((mine + 1))
   done
 
-  # Advance the cursor past everything read, mentioned or not. The cursor is
+  # Advance the cursor past everything swept, mentioned or not (settled_ids
+  # leaves the current second for the next sweep). The cursor is
   # this participant's own state and never travels with the room, so two
   # divergent copies reconcile on posts/ alone.
   local cursor_written=0
-  if [ -n "$newest" ] && [ "$newest" != "$cursor" ]; then
+  if [ -n "$newest" ]; then
     if cursor_put "$room" "$me" "$newest"; then
       cursor_written=1
     else
@@ -882,7 +938,7 @@ catchup_room() {
   sweep_reports+=("$(printf '{"room":"%s","since":%s,"cursor":%s,"cursor_written":%s,"scanned":%s,"delivered":%s}' \
     "$(json_escape "$room")" \
     "$([ -n "$cursor" ] && printf '"%s"' "$(json_escape "$cursor")" || printf null)" \
-    "$([ -n "$newest" ] && printf '"%s"' "$(json_escape "$newest")" || printf null)" \
+    "$([ -n "${newest:-$cursor}" ] && printf '"%s"' "$(json_escape "${newest:-$cursor}")" || printf null)" \
     "$([ "$cursor_written" = 1 ] && echo true || echo false)" \
     "${#new[@]}" "$mine")")
   return 0
@@ -928,6 +984,7 @@ cmd_catchup() {
   sweep_delivered=()
   sweep_reports=()
   sweep_changed=0
+  sweep_now=$(date -u +%Y%m%d-%H%M%S)
   for r in ${rooms[@]+"${rooms[@]}"}; do
     use_room "$r"
     # Reader-initiated pull. catchup is already the verb that asks "is there
