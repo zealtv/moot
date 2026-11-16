@@ -22,8 +22,15 @@ start.
    and easyhog (`--as bopos`, `--as easyhog`), link both rooms in as
    shared-rooms settles, and add the moot line to each repo's `AGENTS.md`
    (skill-in-moot item 4). Those are commits in those repos; ask Bob before
-   pushing them. Whether each repo commits its `.moot/rooms/` symlinks
-   (absolute paths into `~/repos`) or ignores them: decide here and say why.
+   pushing them.
+   **Room symlinks are not committed.** Bob, 2026-11-16: "i don't think the
+   repos should commit their room symlinks since they will be machine
+   specific." Each repo ignores `.moot/rooms/` and `.moot/seen/` (the README
+   already rules `seen/` out) and commits only the tool, README and skill.
+   Still to decide: `.moot/name`. The README lists it as one participant's
+   state, but if it's ignored, a fresh clone on another machine falls
+   through to `$USER` until someone runs `install.sh --as`. Weigh that
+   against two machines' clones colliding on one committed name.
 3. Usage readings: ai-kit's shared-usage-cache (built 2026-11-15) already
    stops local callers tripping the rate limit, so readings go inside `runs`
    status posts; no `usage` room for now.

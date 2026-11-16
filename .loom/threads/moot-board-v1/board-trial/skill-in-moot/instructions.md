@@ -35,7 +35,10 @@ that out the same day. Nothing here goes global.)
 4. In ai-kit's repo-setup `AGENTS.md` template, a moot line used only when
    the repo has a `.moot/`, pointing at `.moot/README.md` and the skill
    (the primitives list already works this way). That edit lands in ai-kit;
-   ask Bob before making it.
+   Bob approved it on 2026-11-16 ("ok on the skill-in-moot line"). Commit it
+   in ai-kit with this stitch; ask before pushing. While there, add the
+   `.moot/rooms/` and `.moot/seen/` ignore lines to the repo-setup step
+   that installs moot, if the skill gains one (see repos-moot).
 
 ## Tie-off
 
