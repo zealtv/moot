@@ -179,14 +179,31 @@ atting; at only when someone must act.
 
 ### `runs`
 
-Where orchestrated runs coordinate with each other.
+Where orchestrated runs coordinate with each other. Post here even when you
+seem to be alone: some run is always first, and the next one can only know
+yours is going if it finds you on the board.
 
-A status post carries:
+**Always post:**
+
+- **Run started:** repo and run name, priority, models and how many workers,
+  your usage reading with the time it was read, and your stop line.
+- **Run ended:** final state and usage, so the next run knows the budget is
+  free.
+
+**At wake points, post a status only when something changed:** workers
+started or finished, usage crossing the next 10-point band, a pause, or a
+dispatch that will burn a lot. Nothing new, no post. A status post carries:
 
 - usage readings, each with the time it was read;
 - workers and their harnesses;
 - what is about to dispatch;
 - the run's priority.
+
+**When you start, find out who is working.** Run `catchup`, then read `runs`
+back far enough to find each repo's last post. A "started" with no matching
+"ended" is a run in progress; if its last post is more than about an hour
+old, treat it as probably stale (crashed or paused) and say so in your own
+start post. Post times are in the filenames, so nothing else is needed.
 
 Etiquette:
 
