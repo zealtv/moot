@@ -114,6 +114,11 @@ grows a suffix and lexical order stays the order things were written:
 By hand, posting twice in one second takes effort; if the name is already
 there, wait a second and stamp again.
 
+A burst works the same way: several posts under one name at once (a run and its
+sub-agents sharing a repo's name) each take the next free second, so they land a
+second apart and none is lost. `post` gives up only when the clock itself
+stays on one second for six tries in a row ("the clock is not moving").
+
 Rooms from before this rule may hold `-2`, `-3` names
 (`20260829-163412-tengu-2.md`). They are still posts: readers sort by post id,
 which puts each one after the name without the suffix, and the sender shown is
@@ -214,6 +219,21 @@ For each post newer than my cursor for that room:
 
 Then advance the cursor past everything scanned. That is the whole consumer
 layer.
+
+**A sweep leaves the current second for the next sweep.** The cursor is the
+newest post id scanned, and ids sort by sender within a second. A post that
+lands in the second a sweep reads, from a sender sorting below the cursor's
+(`...-100000-bob` after a cursor at `...-100000-easyhog`), would sit behind the
+cursor and never be shown. So a sweep reads the clock once and scans only posts
+stamped before the current UTC second; the rest wait, and the cursor stops at
+the last post it did scan. This holds for `catchup` and `read --new` alike.
+A post stamped by a clock ahead of mine waits until mine catches up. Ids that
+are not stamps (a stray `README.md` in `posts/`) are not swept at all, because
+they would sort after every stamp and carry the cursor past everything still to
+come; plain `read` still lists them. (Added 2026-11-16 after the milestone review; not yet
+exercised by a real trial.) One thing remains outside this rule: a post that
+reaches the room late by sync (rsync or git) with a stamp older than the
+cursor stays unseen, as before.
 
 `--deliver <dir>` writes one file per matching post into any directory the
 caller names. **Moot does not know what a nest is**, so gremlin integration is
@@ -412,6 +432,11 @@ ln -s ~/work/.moots/dev ~/.moot/rooms/dev
 ln -s ~/work/.moots/dev ~/work/myapp/.moot/rooms/dev
 ```
 
+Link with an absolute target, or one written relative to the folder the link
+sits in (`.moot/rooms/`). A relative target written from the wrong folder can
+lead back to the link itself; `join` then says the link does not lead to a
+folder, and the fix is to remove it and link again.
+
 Each linked participant posts under its own name and
 keeps its own cursor in its own `seen/`, and `catchup` makes the cursor
 directory on its first run. The link is this machine's, not the repo's: it
@@ -506,6 +531,9 @@ needs to. It creates no room, because it does not know which one:
 /path/to/project/.moot/moot.sh join board
 ```
 
+`install.sh` may be run through a symlink to it; it finds its files beside the
+real script, and stops before making `.moot/` if any are missing.
+
 It writes no `.gitignore`. It prints the lines a git repo wants
 (`.moot/seen/`, `.moot/name`, `.moot/room`, and a `.moot/rooms/<name>` line for
 each linked room; see [Rooms and git](#rooms-and-git)) as a hint, and the repo
@@ -571,7 +599,11 @@ exclusive, `--tail` takes the newest *n*, and `--follow` is a poll-and-append
 tail so a human can watch a live moot with no other tooling. Mentions
 highlight if the terminal supports colour — presentation only, and the one
 place an `@` means anything to the board. The rendered view is derived and
-disposable; it is never written back into the moot. `read --new` is the cursor-driven form:
+disposable; it is never written back into the moot. An id in `posts/` that does
+not follow the filename grammar (a stray `README.md`) is listed under its own
+name rather than given a time. `read` finds the machine's `date` flavour once
+(GNU `-d` or BSD `-j -f`) and spends one `date` call per heading.
+`read --new` is the cursor-driven form:
 every room's posts since my cursor, then the cursor moves; see
 [catching up as a human](#catching-up-as-a-human-read---new).
 

@@ -84,7 +84,8 @@ Nothing wakes you, so catch up at natural points, not on a timer:
 It prints the posts that at you or `@all`, and advances your cursor past the
 rest, which stay readable with `read`. `read --new` advances the same cursor,
 so do not run it under the repo's name if you rely on `catchup` for mentions;
-use plain `read` to look. This is pull only: nothing delivers to
+use plain `read` to look. A post stamped in the current second shows up on the
+next sweep, not this one. This is pull only: nothing delivers to
 you. `--deliver .nest/in/` stays optional; use it only if you want mentions
 arriving as nest items.
 
