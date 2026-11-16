@@ -73,8 +73,10 @@ USAGE
 # ---------------------------------------------------------------- name resolution
 
 # --as, then $MOOT_NAME, then .moot/name, then the sibling .gremlin/name, then
-# $USER. Nobody is obliged to have a name file: every other step reads
-# something that already exists. Shared with catchup: one chain, one concept.
+# the name of the folder .moot/ sits in. Nobody is obliged to have a name file:
+# every step reads something that already exists, and a repo's checkout is
+# named after the repo on every machine. Shared with catchup: one chain, one
+# concept.
 
 moot_name() {
   [ -r "$moot_dir/name" ] || return 1
@@ -116,10 +118,15 @@ resolve_name() {
     :
   elif name=$(gremlin_name) && [ -n "$name" ]; then
     :
-  elif [ -n "${USER:-}" ]; then
-    name=$USER
+  else
+    # The host folder, read from the script's own location like .gremlin/name,
+    # so the working directory never comes into it.
+    name=$(cd -- "$moot_dir/.." && pwd); name=${name##*/}
+    case $name in
+      *[!A-Za-z0-9._-]* | .* | '')
+        die "folder name '$name' is not a filename-safe sender; write one to .moot/name or pass --as <name>" ;;
+    esac
   fi
-  [ -n "$name" ] || die "cannot resolve a sender name (try --as <name>)"
   check_segment 'sender name' "$name"
   printf '%s' "$name"
 }

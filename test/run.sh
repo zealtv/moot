@@ -502,7 +502,7 @@ inner="$outer/host"; mkdir -p "$inner"
 "$repo/install.sh" "$inner" >/dev/null
 "$inner/.moot/moot.sh" join board >/dev/null
 ( cd "$inner" && MOOT_NAME= USER=username "$inner/.moot/moot.sh" post -m 'x' >/dev/null )
-check 'an ancestor .gremlin/name is not a sibling' "$(sender_of "$inner")" 'username'
+check 'an ancestor .gremlin/name is not a sibling' "$(sender_of "$inner")" 'host'
 
 # The wiring line a gremlin host runs is relative, from the host root.
 room=$(new_room)
@@ -512,13 +512,22 @@ printf '@fanta over to you\n' > "$room/.moot/rooms/board/posts/20260829-100000-b
 ( cd "$room" && MOOT_NAME= USER=username ./.moot/moot.sh catchup --deliver .nest/in/ >/dev/null )
 check 'the relative wiring line delivers' "$(ls "$room/.nest/in" | wc -l | tr -d ' ')" '1'
 
-room=$(new_room)
-( cd "$work" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
-check '$USER is the last resort' "$(sender_of "$room")" 'username'
+# The last resort is the folder .moot/ sits in, so a repo needs no name file.
+named="$work/bopOS"; mkdir -p "$named"
+"$repo/install.sh" "$named" >/dev/null; "$named/.moot/moot.sh" join board >/dev/null
+( cd "$work" && MOOT_NAME= USER=username "$named/.moot/moot.sh" post -m 'x' >/dev/null )
+check 'the host folder name is the last resort, not $USER' "$(sender_of "$named")" 'bopOS'
+( cd / && env -u MOOT_NAME -u USER "$named/.moot/moot.sh" post -m 'y' >/dev/null )
+check 'and needs no $USER at all' "$(ls "$named/.moot/rooms/board/posts" | grep -c 'bopOS')" '2'
 
-room=$(new_room)
-( cd "$work" && env -u MOOT_NAME -u USER "$room/.moot/moot.sh" post -m 'x' >/dev/null 2>&1 ) \
-  && no 'no name at all is an error' || ok 'no name at all is an error'
+spaced="$work/Pedal Board"; mkdir -p "$spaced"
+"$repo/install.sh" "$spaced" >/dev/null; "$spaced/.moot/moot.sh" join board >/dev/null
+err=$( cd "$work" && MOOT_NAME= "$spaced/.moot/moot.sh" post -m 'x' 2>&1 >/dev/null ) \
+  && no 'an unsafe folder name is an error' || ok 'an unsafe folder name is an error'
+check 'and the error names the fix' "$(printf '%s' "$err" | grep -c '.moot/name')" '1'
+printf 'pedal\n' > "$spaced/.moot/name"
+( cd "$work" && MOOT_NAME= "$spaced/.moot/moot.sh" post -m 'x' >/dev/null )
+check '.moot/name rescues it' "$(sender_of "$spaced")" 'pedal'
 
 # ---------------------------------------------------------------- no tool needed
 
@@ -745,6 +754,44 @@ before=$(cat "$room/.moot/seen/board/bob")
 rsync -a "$twin/.moot/rooms/board/posts/" "$room/.moot/rooms/board/posts/"; rsync -a "$room/.moot/rooms/board/posts/" "$twin/.moot/rooms/board/posts/"
 check 'the rooms reconcile on posts/ alone' "$(ls "$room/.moot/rooms/board/posts"/*.md | wc -l | tr -d ' ')" '2'
 check 'syncing the room leaves the cursor alone' "$(cat "$room/.moot/seen/board/bob")" "$before"
+
+group 'rooms shared by symlink'
+# One parent holds the real room; two repos beside it link it in. Each repo
+# keeps its own name (its folder) and its own cursor. No path has two writers.
+parent=$(mktemp -d "$work/repos.XXXXXX")
+"$repo/install.sh" "$parent" >/dev/null
+printf 'bob\n' > "$parent/.moot/name"
+"$parent/.moot/moot.sh" join dev >/dev/null
+for r in bopOS easyhog; do
+  mkdir -p "$parent/$r"
+  "$repo/install.sh" "$parent/$r" >/dev/null
+  ln -s "$parent/.moot/rooms/dev" "$parent/$r/.moot/rooms/dev"
+done
+b() { ( cd "$work" && MOOT_NAME= "$parent/bopOS/.moot/moot.sh" "$@" ); }
+e() { ( cd "$work" && MOOT_NAME= "$parent/easyhog/.moot/moot.sh" "$@" ); }
+h() { ( cd "$work" && MOOT_NAME= "$parent/.moot/moot.sh" "$@" ); }
+
+check 'a linked room is a room' "$(b rooms | grep -c dev)" '1'
+step_date 20260829-100000 20260829-100000 20260829-100000
+b post -m '@easyhog dispatching two workers' >/dev/null
+e post -m '@bopOS ok, holding mine' >/dev/null
+h post -m '@all usage is fine' >/dev/null
+thaw_step
+check 'three repos posting in one second get three ids' \
+  "$(ls "$parent/.moot/rooms/dev/posts" | tr '\n' ' ')" \
+  '20260829-100000-bob.md 20260829-100000-bopOS.md 20260829-100000-easyhog.md '
+
+out_e=$(e catchup --json)
+check 'each repo catches up under its folder name' "$(printf '%s' "$out_e" | grep -o '"sender":"[^"]*"')" '"sender":"easyhog"'
+check 'and gets what mentions it' "$(printf '%s' "$out_e" | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":2'
+[ -f "$parent/easyhog/.moot/seen/dev/easyhog" ] && ok 'the cursor lives in the reading repo' || no 'the cursor lives in the reading repo'
+[ ! -e "$parent/.moot/seen/dev/easyhog" ] && ok 'and never in the room holder' || no 'and never in the room holder'
+[ ! -e "$parent/.moot/rooms/dev/seen" ] && [ "$(ls -A "$parent/.moot/rooms/dev")" = posts ] \
+  && ok 'the shared room holds posts/ and nothing else' || no 'the shared room holds posts/ and nothing else'
+check "one repo's catchup leaves another's cursor alone" "$(ls -A "$parent/bopOS/.moot/seen/dev" 2>/dev/null | wc -l | tr -d ' ')" '0'
+out_b=$(b catchup --json)
+check 'the other repo still gets its own mentions' "$(printf '%s' "$out_b" | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":2'
+check 'and a second sweep delivers nothing twice' "$(b catchup --json | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":0'
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
