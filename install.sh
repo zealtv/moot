@@ -23,11 +23,26 @@
 
 set -euo pipefail
 
-source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# Where this script really lives, so a symlink to it (~/bin/moot-install, say)
+# still finds moot.sh, README.md and skills/ beside the real file. A relative
+# link target is relative to the folder holding the link.
+src=${BASH_SOURCE[0]}
+while [ -L "$src" ]; do
+  link_dir=$(cd -P -- "$(dirname -- "$src")" && pwd)
+  src=$(readlink -- "$src")
+  case $src in /*) ;; *) src=$link_dir/$src ;; esac
+done
+source_dir=$(cd -P -- "$(dirname -- "$src")" && pwd)
 host=${1:-$PWD}
 
 [ -d "$host" ] || { printf 'install: no such directory: %s\n' "$host" >&2; exit 1; }
 host=$(cd -- "$host" && pwd)
+
+# Look before making anything: a missing source file used to fail at cp and
+# leave an empty .moot/ behind.
+for f in moot.sh README.md skills/moot.md; do
+  [ -r "$source_dir/$f" ] || { printf 'install: cannot find %s beside install.sh (looked in %s)\n' "$f" "$source_dir" >&2; exit 1; }
+done
 
 mkdir -p -- "$host/.moot"
 cp -- "$source_dir/moot.sh" "$host/.moot/moot.sh"

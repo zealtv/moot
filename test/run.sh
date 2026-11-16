@@ -766,6 +766,22 @@ done
 case $hint in *"  .moot/rooms/"$'\n'*) no 'install does not hint at ignoring all of rooms/' ;; *) ok 'install does not hint at ignoring all of rooms/' ;; esac
 [ ! -e "$host/.gitignore" ] && ok 'install writes no .gitignore' || no 'install writes no .gitignore'
 
+# Run through a symlink, install still finds the files beside the real script,
+# whether the link target is absolute or relative to the link's folder.
+host=$(mktemp -d "$work/viaarg.XXXXXX"); bindir=$(mktemp -d "$work/bin-links.XXXXXX")
+ln -s "$repo/install.sh" "$bindir/moot-install"
+"$bindir/moot-install" "$host" >/dev/null 2>&1 && ok 'install runs through an absolute symlink' || no 'install runs through an absolute symlink'
+cmp -s "$repo/moot.sh" "$host/.moot/moot.sh" && ok 'and installs the real moot.sh' || no 'and installs the real moot.sh'
+host=$(mktemp -d "$work/viarel.XXXXXX"); mkdir -p "$work/two/bin"
+ln -s "$repo" "$work/two/repo"; ln -s ../repo/install.sh "$work/two/bin/link-install"
+"$work/two/bin/link-install" "$host" >/dev/null 2>&1 && ok 'install runs through a relative symlink' || no 'install runs through a relative symlink'
+# A script without its siblings fails before it makes anything.
+host=$(mktemp -d "$work/lonely.XXXXXX"); mkdir "$work/lonely-src"; cp "$repo/install.sh" "$work/lonely-src/"
+err=$("$work/lonely-src/install.sh" "$host" 2>&1 >/dev/null); rc=$?
+[ "$rc" -ne 0 ] && ok 'install with files missing fails' || no 'install with files missing fails'
+check 'and says what it could not find' "$(printf '%s' "$err" | grep -c 'cannot find moot.sh')" '1'
+[ -e "$host/.moot" ] && no 'and leaves no empty .moot/ behind' || ok 'and leaves no empty .moot/ behind'
+
 # .moot/ is a dotdir among dotdirs: installing beside the rest of the family
 # touches none of it.
 host=$(mktemp -d "$work/family.XXXXXX")
@@ -884,6 +900,27 @@ out=$(m read --new --as tengu)
 check 'a non-stamp file is not swept' "$(printf '%s' "$out" | grep -c 'not a post')" '0'
 check 'and does not hide the post after it' "$(printf '%s' "$out" | grep -c 'real post')" '1'
 check 'because the cursor stays on the last stamp' "$(cat "$room/.moot/seen/board/tengu")" '20260829-100600-bob'
+
+# read --new through a linked room: each repo's cursor stays in its own seen/.
+rp_dev() { printf '%s\n' "$2" > "$parent/.moot/rooms/dev/posts/$1.md"; }
+rp_dev 20260829-110000-bob '@all a late note'
+out=$(b read --new)
+check 'read --new reads a linked room' "$(printf '%s' "$out" | grep -c 'a late note')" '1'
+[ -f "$parent/bopOS/.moot/seen/dev/bopOS" ] && ok 'and its cursor is in the reading repo' || no 'and its cursor is in the reading repo'
+[ ! -e "$parent/.moot/seen/dev/bopOS" ] && ok 'and not in the room holder' || no 'and not in the room holder'
+check "so another repo's --new still shows the post" "$(e read --new | grep -c 'a late note')" '1'
+check 'and a second --new in the first repo shows nothing' "$(b read --new)" 'nothing new for bopOS'
+
+# A room link whose relative target leads back to itself loops. join says so.
+loop=$(new_host)
+ln -s ../../.moot/rooms/dev "$loop/.moot/rooms/dev"
+err=$("$loop/.moot/moot.sh" join dev 2>&1 >/dev/null); rc=$?
+[ "$rc" -ne 0 ] && ok 'join on a looping room link fails' || no 'join on a looping room link fails'
+check 'and names the link, not mkdir' "$(printf '%s' "$err" | grep -c 'rooms/dev is a link that does not lead to a folder')" '1'
+check 'and does not say "Too many levels"' "$(printf '%s' "$err" | grep -c 'Too many levels')" '0'
+dangling=$(new_host)
+ln -s "$work/nowhere-at-all" "$dangling/.moot/rooms/dev"
+"$dangling/.moot/moot.sh" join dev >/dev/null 2>&1 && no 'join on a dangling room link fails' || ok 'join on a dangling room link fails'
 
 # ---------------------------------------------------------------- local time
 

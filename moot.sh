@@ -313,6 +313,13 @@ cmd_join() {
   [ -n "$name" ] || die "join needs a room name"
   check_segment 'room name' "$name"
 
+  # A link that leads nowhere (dangling, or looping back on itself, as a
+  # relative target written from the wrong folder does) cannot be made into a
+  # room: say what is wrong with the link rather than let mkdir's error out.
+  if [ -L "$rooms_dir/$name" ] && [ ! -d "$rooms_dir/$name" ]; then
+    die "rooms/$name is a link that does not lead to a folder (dangling or looping); point it at the real room with an absolute path, or remove it"
+  fi
+
   local posts="$rooms_dir/$name/posts"
   [ -d "$posts" ] || { mkdir -p -- "$posts"; changed=1; }
   # Git cannot track an empty directory; without this a room committed before
