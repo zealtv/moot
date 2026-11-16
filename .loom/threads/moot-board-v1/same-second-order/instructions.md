@@ -26,7 +26,7 @@ what `read`/`catchup` do with any `-N` posts already on disk (likely: read
 them as before, never write new ones), and update the README's
 "Same-second collisions" section.
 
-It matters more once [[host-moot]] puts many posters in one room, so it sits
+It matters more once [[shared-rooms]] puts many posters in one room, so it sits
 ahead of [[repos-moot]].
 
 ## Tie-off

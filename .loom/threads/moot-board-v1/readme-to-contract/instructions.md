@@ -23,7 +23,7 @@ Filename as the whole header; immutability so union is the merge; the cursor
 outside the room; reader-side `@`; `--deliver <dir>`; the atomic
 `link(2)` claim; etiquette in `skills/moot.md`; "a moot needs no tool".
 
-Do it after [[host-moot]], [[same-second-order]] and any
+Do it after [[shared-rooms]], [[same-second-order]] and any
 [[extract-git-transport]] decision, so the README gets rewritten once. Keep
 public text free of lore/loom/glean ids (`loom:public-split`).
 

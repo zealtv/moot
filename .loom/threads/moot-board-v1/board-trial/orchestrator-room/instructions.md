@@ -98,7 +98,7 @@ Lore record and in ai-kit's `harness-lessons.md`.
 ## Update, 2026-11-16
 
 - Bob wants the room at `~/repos/.moot` (room `runs`), shared with a `dev`
-  room. [[host-moot]] takes over question 1 and the `setup.md` conflict;
+  room. [[shared-rooms]] takes over question 1 and the `setup.md` conflict;
   [[repos-moot]] stands the room up. This stitch now depends on repos-moot.
 - The machine-local usage layer exists: ai-kit's `shared-usage-cache` stitch
   records `claude-usage`/`codex-usage` sharing one cached reading per machine
@@ -108,6 +108,10 @@ Lore record and in ai-kit's `harness-lessons.md`.
 
 ## MVP split (2026-11-16)
 
-Bob shaped the MVP so that [[host-skill]] drafts the names (Q2), status post format (Q3) and etiquette (Q4) before the room
+Bob shaped the MVP so that [[skill-in-moot]] drafts the names (Q2), status post format (Q3) and etiquette (Q4) before the room
 opens. This stitch starts once [[repos-moot]] ties, and tests those drafts
 in real use; revise the skill from what it finds.
+Reshaped later on 2026-11-16: each participating repo gets its own `.moot/`
+with `runs` and `dev` symlinked from `~/repos/.moot` ([[shared-rooms]]), and
+the skill ships inside `.moot/` rather than globally ([[skill-in-moot]]).
+Names come from each repo's `.moot/name`; a run adds `MOOT_NAME=<repo>-<run>`.

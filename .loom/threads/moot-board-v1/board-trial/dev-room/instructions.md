@@ -34,6 +34,10 @@ room" heading, ready for trial-run's Lore record.
 
 ## MVP split (2026-11-16)
 
-Bob shaped the MVP so that [[host-skill]] drafts the session join (Q1) and naming (Q2) conventions before the room
+Bob shaped the MVP so that [[skill-in-moot]] drafts the session join (Q1) and naming (Q2) conventions before the room
 opens. This stitch starts once [[repos-moot]] ties, and tests those drafts
 in real use; revise the skill from what it finds.
+Reshaped later on 2026-11-16: each participating repo gets its own `.moot/`
+with `runs` and `dev` symlinked from `~/repos/.moot` ([[shared-rooms]]), and
+the skill ships inside `.moot/` rather than globally ([[skill-in-moot]]).
+Names come from each repo's `.moot/name`; a run adds `MOOT_NAME=<repo>-<run>`.
