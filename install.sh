@@ -38,5 +38,8 @@ chmod +x "$host/.moot/moot.sh"
 "$host/.moot/moot.sh" init >/dev/null
 printf 'installed moot into %s/.moot\n' "$host"
 printf 'join a room with: %s/.moot/moot.sh join <room>\n' "$host"
-printf 'if that is a git repo, add these to its .gitignore (this is one participant'"'"'s state):\n'
-printf '  .moot/rooms/\n  .moot/seen/\n  .moot/name\n'
+printf 'if that is a git repo, add these to its .gitignore (they are one participant'"'"'s state):\n'
+printf '  .moot/seen/\n  .moot/name\n  .moot/room\n'
+printf 'a room that is a real directory may be committed; a room that is a symlink is this\n'
+printf "machine's, so ignore it by name, with no trailing slash:\n"
+printf '  .moot/rooms/<name>\n'

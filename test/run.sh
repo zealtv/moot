@@ -735,9 +735,12 @@ check 'install is repeatable' "$(ls -A "$host/.moot" | wc -l | tr -d ' ')" '5'
 
 # The ignore lines are a hint on stdout; install writes no .gitignore itself.
 hint=$("$repo/install.sh" "$host")
-for line in '.moot/rooms/' '.moot/seen/' '.moot/name'; do
+for line in '.moot/seen/' '.moot/name' '.moot/room' '.moot/rooms/<name>'; do
   case $hint in *"  $line"*) ok "install hints at ignoring $line" ;; *) no "install hints at ignoring $line" ;; esac
 done
+# One rule on rooms: a real directory may be committed, so the hint must not
+# ignore the whole rooms/ directory (that was the old, contradicting hint).
+case $hint in *"  .moot/rooms/"$'\n'*) no 'install does not hint at ignoring all of rooms/' ;; *) ok 'install does not hint at ignoring all of rooms/' ;; esac
 [ ! -e "$host/.gitignore" ] && ok 'install writes no .gitignore' || no 'install writes no .gitignore'
 
 # .moot/ is a dotdir among dotdirs: installing beside the rest of the family

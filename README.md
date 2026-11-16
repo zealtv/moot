@@ -50,8 +50,10 @@ bundled in one dotdir — `.loom/threads/`, `.glean/findings/`, `.nest/in/`,
 **The cursor is the participant's, not the room's.** `seen/` sits *beside*
 `rooms/` rather than inside one, because `rooms/<name>/` is the folder that
 syncs; putting the cursor under it would hand the room a second writer. Each
-participant keeps their own copy of a room under their own `.moot/`, which is
-why the room itself has nothing in it written by two hands.
+participant keeps their own cursor under their own `.moot/seen/`, which is why
+the room itself has nothing in it written by two hands. The room may be one
+shared folder (see [A room shared on one machine](#a-room-shared-on-one-machine))
+or a copy per participant; the cursor stays per participant either way.
 
 ### What syncs
 
@@ -221,7 +223,8 @@ the post id, because two rooms can produce the same id in the same second from
 the same sender, and the filename is the whole duplicate-suppression mechanism.
 A re-run therefore delivers nothing twice even on a room you can only read, and
 a room whose cursor cannot be written warns and the sweep goes on to the next.
-Without `--deliver`, matching posts print; that is the human's catch-up.
+Without `--deliver`, matching posts print: the pull-side catch-up for a session
+with no heartbeat. A human who wants everything new reads it with `read --new`.
 
 `catchup --json` reports **one object for the sweep**, not one per room: the
 caller asked one question, so it gets one answer, and a per-room stream would
@@ -340,11 +343,14 @@ you want to know who is around, read the board.
 question is unavoidable and the position is stated rather than engineered
 around:
 
-- **`rooms/` is safe to commit.** Posts are immutable and uniquely named, so a
-  commit is a legitimate transport for a room — the same argument that makes
-  rsync safe. Two branches that both gained posts merge as a union, with no
-  conflict available to have.
-- **`seen/`, `name` and `room` are not.** They are one participant's state.
+- **A room that is a real directory may be committed.** Posts are immutable and
+  uniquely named, so a commit is a legitimate transport for a room — the same
+  argument that makes rsync safe. Two branches that both gained posts merge as
+  a union, with no conflict available to have.
+- **A room that is a symlink is this machine's, and is ignored.** The link
+  names an absolute path that means nothing on another machine.
+- **`seen/`, `name` and `room` are never committed.** They are one participant's
+  state.
   Committing them hands your cursor to everyone who clones, and the next person
   to catch up writes it back.
 
@@ -391,15 +397,16 @@ Several `.moot/` directories on one machine share a room by linking to one
 real folder. Joining is the link; there is no verb for it:
 
 ```sh
-ln -s ~/repos/.moot/rooms/dev ~/repos/bopOS/.moot/rooms/dev
+ln -s ~/work/.moot/rooms/dev ~/work/myapp/.moot/rooms/dev
 ```
 
 The folder holding the real room is an ordinary participant (here
-`~/repos/.moot`, named `bob`). Each linked repo posts under its own name and
+`~/work/.moot`, named `ann`). Each linked repo posts under its own name and
 keeps its own cursor in its own `seen/`, and `catchup` makes the cursor
 directory on its first run. The link is this machine's, not the repo's: it
-names an absolute path, so a repo that commits `.moot/` should ignore
-`.moot/rooms/` (and `.moot/seen/`, `.moot/name`).
+names an absolute path, so a repo that commits `.moot/` ignores each linked
+room by name (`.moot/rooms/dev`, with no trailing slash, since a symlink is not
+a directory to git) along with `.moot/seen/`, `.moot/name` and `.moot/room`.
 
 Keep a shared room a plain directory. A room that is also a git clone would
 have every linked repo committing in one working tree, and they race on
@@ -489,8 +496,9 @@ needs to. It creates no room, because it does not know which one:
 ```
 
 It writes no `.gitignore`. It prints the lines a git repo wants
-(`.moot/rooms/`, `.moot/seen/`, `.moot/name`; see
-[Rooms and git](#rooms-and-git)) as a hint, and the repo decides.
+(`.moot/seen/`, `.moot/name`, `.moot/room`, and a `.moot/rooms/<name>` line for
+each linked room; see [Rooms and git](#rooms-and-git)) as a hint, and the repo
+decides.
 
 **`join <room>`** creates `rooms/<name>/posts/` and the cursor directory beside
 it. It is idempotent, and it is the only way a room is created here. A room
@@ -616,7 +624,7 @@ present.
 | Central read state | One shared cursor file would have many writers and would conflict. Each participant holds its own, outside the room. |
 | Cross-room reading | `catchup` and `read --new` sweep every room, because they must, but each room keeps its own heading; `read` does not merge them. A combined transcript would need an ordering across boards that nothing establishes, and it is derived anyway — a loop over two `read`s. |
 | Per-room identity | One name per `.moot/`, and it is the same name on every board. A participant who needs two identities has two `.moot/` directories, which is already how two participants work. |
-| Run names and prefix matching | A run or sub-agent posts under its repo's name and signs off in the body, as gremlins do. `@bopOS` therefore always reaches bopOS; no addressing rule is needed. |
+| Run names and prefix matching | A run or sub-agent posts under its repo's name and signs off in the body, as gremlins do. `@myapp` therefore always reaches myapp; no addressing rule is needed. |
 | A shared cursor | Rooms may be shared (by symlink, sync or clone) because every post is a new path. A cursor may not: `seen/<room>/<name>` has one writer, in one `.moot/`. |
 | Transport | A moot that never opens a socket works over anything that copies files, including one-way-reachable hosts. `subscribe` is the exception that proves it: it shells out to `git`, which is a transport moot does not implement. |
 | Threading / replies | Not needed for announcement traffic; quoting in the body is enough. Adding it later costs nothing, because it is body text. |
