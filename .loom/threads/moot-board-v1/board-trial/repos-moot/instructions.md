@@ -8,18 +8,19 @@ before the first post (Bob, 2026-11-16). Depends on [[same-second-order]],
 **This stitch is the MVP's tie-off** (shaped 2026-11-16, reshaped the same
 day to a `.moot/` per repo). The MVP: Bob, and agents in at least two
 repos with their own `.moot/`, post to and catch up on `runs` and `dev`,
-each under its own repo's name, having learned how from the skill in their
+each under its repo's folder name, having learned how from the skill in their
 `.moot/`. Everything after it (orchestrator-room, dev-room, trial-run) uses
 the MVP for real work and records what happens; none of it is needed to
 start.
 
 ## Do
 
-1. `~/repos/moot/install.sh --as bob ~/repos`; `join runs` and `join dev`
+1. `~/repos/moot/install.sh ~/repos`, then write `bob` to
+   `~/repos/.moot/name`; `join runs` and `join dev`
    there. These are the real room folders, plain directories. `~/repos`
    isn't a git repo (as of 2026-11-16), so nothing commits them; note that.
 2. Install into the two orchestrator repos Bob named on 2026-11-15, bopOS
-   and easyhog (`--as bopos`, `--as easyhog`), link both rooms in as
+   and easyhog; they take the names `bopOS` and `easyhog` from their folders, link both rooms in as
    shared-rooms settles, and add the moot line to each repo's `AGENTS.md`
    (skill-in-moot item 4). Those are commits in those repos; ask Bob before
    pushing them.
@@ -27,10 +28,8 @@ start.
    repos should commit their room symlinks since they will be machine
    specific." Each repo ignores `.moot/rooms/` and `.moot/seen/` (the README
    already rules `seen/` out) and commits only the tool, README and skill.
-   Still to decide: `.moot/name`. The README lists it as one participant's
-   state, but if it's ignored, a fresh clone on another machine falls
-   through to `$USER` until someone runs `install.sh --as`. Weigh that
-   against two machines' clones colliding on one committed name.
+   `.moot/name` is ignored too: with names taken from the folder
+   (shared-rooms item 5, Bob 2026-11-16) a repo needs no name file.
 3. Usage readings: ai-kit's shared-usage-cache (built 2026-11-15) already
    stops local callers tripping the rate limit, so readings go inside `runs`
    status posts; no `usage` room for now.

@@ -50,10 +50,28 @@ and `post_ids()` follow links (README, "A room that is a symlink").
    committing in one working tree race on `index.lock` (the review measured
    five "could not commit" warnings from six concurrent posts). Say so; the
    real rooms in `~/repos/.moot` start as plain directories.
-5. **Names.** `install.sh --as <name>` writes `.moot/name` at install, so
-   a repo's name never falls through to `$USER`. Two sessions in one repo
-   would share a name and a cursor; a run sets `MOOT_NAME=<repo>-<run>`
-   (`bopos-v3.9`). Convention only, carried by [[skill-in-moot]].
+5. **Names: a `.moot/` is named after the folder it sits in.** Bob chose
+   this on 2026-11-16 ("simple is good - let's go with that"). Replace the
+   chain's last step, `$USER`, with the basename of `.moot/..`, read from the
+   script's own location like `gremlin_name()` (`moot.sh:92`). The chain
+   becomes `--as`, `$MOOT_NAME`, `.moot/name`, `.gremlin/name`, folder name.
+   - No name file in repos: a fresh clone anywhere resolves to `bopOS`.
+     `.moot/name` stays an uncommitted, machine-local override (Bob's
+     `~/repos/.moot/name` holds `bob`, since the folder is `repos`).
+   - Names keep the folder's case, and mentions match exactly: `@bopOS`.
+   - A folder name that fails `check_segment` (spaces, e.g. `Pedal Board
+     Utilities`) dies with the existing message; the fix is `.moot/name`.
+   - A human's `~/.moot` falls back to the home folder name, usually
+     `$USER`, so little changes for them. Check the tests that rely on
+     `$USER` and update the README's name-resolution paragraph.
+   - Two sessions in one repo share a name and a cursor; a run sets
+     `MOOT_NAME=<folder>-<run>` (`bopOS-v3.9`). Convention only, carried by
+     [[skill-in-moot]].
+   - Hostnames (`bopOS.spectre`; `@` isn't filename-safe) matter only when
+     a room crosses machines and two clones of one repo could write the same
+     path. Then each machine sets its own uncommitted `.moot/name`. Out of
+     the MVP; belongs with [[extract-git-transport]] or whatever carries
+     rooms between machines.
 6. **Fix `trial-kit.tied/setup.md`** to match: per-gremlin `.moot/`, rooms
    shared by symlink (or rsync/git across machines). Its claim that a
    gremlin's name "comes from the `.gremlin/name` it already has" (lines
