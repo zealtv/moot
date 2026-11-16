@@ -286,17 +286,84 @@ check 'a landing file is not a post' "$("$room/.moot/moot.sh" read | grep -c 'te
 check 'a landing file is not in posts/*' "$(printf '%s\n' "$room"/.moot/rooms/board/posts/* | grep -c landing)" '0'
 
 group 'same-second collision'
+# A clock that hands out the given stamps in turn (repeating the last), and a
+# sleep that returns at once, so a re-stamp is deterministic and instant.
+step_date() {
+  local bin="$work/bin" list="$work/stamps"
+  mkdir -p "$bin"
+  printf '%s\n' "$@" > "$list"
+  cat > "$bin/date" <<STUB
+#!/bin/sh
+first=\$(head -n 1 "$list")
+rest=\$(tail -n +2 "$list")
+[ -n "\$rest" ] && printf '%s\n' "\$rest" > "$list"
+echo "\$first"
+STUB
+  printf '#!/bin/sh\nexit 0\n' > "$bin/sleep"
+  chmod +x "$bin/date" "$bin/sleep"
+  PATH="$bin:$PATH"
+}
+thaw_step() { rm -f "$work/bin/sleep"; thaw_date; }
+
 room=$(new_room)
-freeze_date '20260829-163412'
+posts="$room/.moot/rooms/board/posts"
+# Three posts, the clock catching up a second at a time.
+step_date 20260829-163412 20260829-163412 20260829-163413 20260829-163413 20260829-163414
 "$room/.moot/moot.sh" post --as tengu -m 'one' >/dev/null
 "$room/.moot/moot.sh" post --as tengu -m 'two' >/dev/null
 "$room/.moot/moot.sh" post --as tengu -m 'three' >/dev/null
-thaw_date
-[ -f "$room/.moot/rooms/board/posts/20260829-163412-tengu.md" ]   && ok 'first post takes the plain name'   || no 'first post takes the plain name'
-[ -f "$room/.moot/rooms/board/posts/20260829-163412-tengu-2.md" ] && ok 'second post takes the -2 name'      || no 'second post takes the -2 name'
-[ -f "$room/.moot/rooms/board/posts/20260829-163412-tengu-3.md" ] && ok 'third post takes the -3 name'       || no 'third post takes the -3 name'
-check 'no post was overwritten' "$(cat "$room/.moot/rooms/board/posts/20260829-163412-tengu.md")" 'one'
-check 'the suffixed post kept its own body' "$(cat "$room/.moot/rooms/board/posts/20260829-163412-tengu-3.md")" 'three'
+thaw_step
+check 'a same-second clash re-stamps instead of suffixing' "$(ls "$posts" | tr '\n' ' ')" \
+  '20260829-163412-tengu.md 20260829-163413-tengu.md 20260829-163414-tengu.md '
+check 'no post was overwritten' "$(cat "$posts/20260829-163412-tengu.md")" 'one'
+check 'the re-stamped post kept its own body' "$(cat "$posts/20260829-163414-tengu.md")" 'three'
+check 'read shows them in the order written' \
+  "$("$room/.moot/moot.sh" read | grep -E '^(one|two|three)$' | tr '\n' ' ')" 'one two three '
+check 'read names the sender plainly' "$("$room/.moot/moot.sh" read | grep -c '· tengu ──')" '3'
+
+# A hyphenated sender, the case a -N suffix could not be told apart from.
+room=$(new_room)
+posts="$room/.moot/rooms/board/posts"
+step_date 20260829-163412 20260829-163412 20260829-163413
+"$room/.moot/moot.sh" post --as tengu-the-gremlin -m 'a' >/dev/null
+"$room/.moot/moot.sh" post --as tengu-the-gremlin -m 'b' >/dev/null
+thaw_step
+check 'a hyphenated sender re-stamps too' "$(ls "$posts" | tr '\n' ' ')" \
+  '20260829-163412-tengu-the-gremlin.md 20260829-163413-tengu-the-gremlin.md '
+
+# A directory post holds the id as surely as a file does.
+room=$(new_room)
+posts="$room/.moot/rooms/board/posts"
+mkdir "$posts/20260829-163412-bob"; printf 'with files\n' > "$posts/20260829-163412-bob/post.md"
+step_date 20260829-163412 20260829-163413
+"$room/.moot/moot.sh" post --as bob -m 'plain' >/dev/null
+thaw_step
+[ -f "$posts/20260829-163413-bob.md" ] && ok 'a directory post of the same id counts as taken' \
+  || no 'a directory post of the same id counts as taken'
+
+# A clock that never moves gives up rather than spin.
+room=$(new_room)
+posts="$room/.moot/rooms/board/posts"
+step_date 20260829-163412
+"$room/.moot/moot.sh" post --as tengu -m 'first' >/dev/null
+err=$("$room/.moot/moot.sh" post --as tengu -m 'stuck' 2>&1 >/dev/null); rc=$?
+thaw_step
+[ "$rc" -ne 0 ] && ok 'a stopped clock fails the post' || no 'a stopped clock fails the post'
+check 'and says why' "$(printf '%s' "$err" | grep -c 'clock is not moving')" '1'
+check 'and leaves no landing file behind' "$(ls -A "$posts" | grep -c landing)" '0'
+check 'and claims nothing' "$(ls "$posts" | wc -l | tr -d ' ')" '1'
+
+# -N posts from before the change still read and catch up in order, once.
+room=$(new_room)
+posts="$room/.moot/rooms/board/posts"
+printf '@bob first\n'  > "$posts/20260829-163412-tengu.md"
+printf '@bob second\n' > "$posts/20260829-163412-tengu-2.md"
+check 'an old -N post reads after the one without it' \
+  "$("$room/.moot/moot.sh" read | grep -E '^@bob' | tr '\n' ' ')" '@bob first @bob second '
+first=$("$room/.moot/moot.sh" catchup --json --as bob)
+again=$("$room/.moot/moot.sh" catchup --json --as bob)
+check 'catchup delivers both old posts once' "$(printf '%s' "$first" | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":2'
+check 'and not again on the next run' "$(printf '%s' "$again" | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":0'
 
 # ---------------------------------------------------------------- ordering
 

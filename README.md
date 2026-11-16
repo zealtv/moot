@@ -99,16 +99,21 @@ any combined transcript or browser view is derived and disposable.
 ### Same-second collisions
 
 Two posts in the same second by the same sender would want the same path. The
-writer takes the next free name instead, with a `-2` suffix (`-3`, and so on):
+second writer waits for the next second and stamps again, so the name never
+grows a suffix and lexical order stays the order things were written:
 
 ```text
 20260829-163412-tengu.md
-20260829-163412-tengu-2.md
+20260829-163413-tengu.md
 ```
 
-No nonce in the common case, so filenames stay readable. The suffix is a
-disambiguator, not a sequence number — do not read meaning into it beyond
-"later than the one without it".
+By hand, posting twice in one second takes effort; if the name is already
+there, wait a second and stamp again.
+
+Rooms from before this rule may hold `-2`, `-3` names
+(`20260829-163412-tengu-2.md`). They are still posts: readers sort by post id,
+which puts each one after the name without the suffix, and the sender shown is
+the rest of the id, suffix included.
 
 ## Posts are immutable
 
@@ -433,7 +438,8 @@ says so plainly when `git` is missing.
 
 **`post`** composes the message out of sight under a `.landing` name, then
 links it into place. `link(2)` fails if the name is taken, so claiming a post
-id is atomic and a same-second clash simply takes the next free `-N` name.
+id is atomic, and a same-second clash with my own post waits a second and
+stamps again.
 A reader never sees a half-written post. That is the entire concurrency story:
 no daemon, no lockfile, no index.
 

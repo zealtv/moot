@@ -194,6 +194,11 @@ use_room() {
 # Post ids in chronological order. Lexical order is chronological order, which
 # is the whole point of the filename grammar. Anything hidden (a .landing file
 # mid-compose) is skipped, so a reader never sees a half-written post.
+# Sorted by id, not by filename: the cursor compares ids, and a filename
+# sort puts an older `-N` post (`x-tengu-2.md`) before `x-tengu.md` because
+# `-` sorts before `.`. Sorting the ids keeps every reader's order and the
+# cursor's order the same, including for -N posts written before post stopped
+# making them.
 post_ids() {
   local entry base
   [ -d "$posts_dir" ] || return 0
@@ -206,7 +211,7 @@ post_ids() {
     else
       case $base in *.md) printf '%s\n' "${base%.md}" ;; esac
     fi
-  done
+  done | sort -u
 }
 
 post_body_path() {
@@ -506,17 +511,24 @@ cmd_post() {
   landing="$posts_dir/.$stamp-$sender.$$.landing"
   printf '%s\n' "$body" > "$landing"
 
-  # link(2) fails if the target exists, so claiming a name is atomic: on a
-  # same-second clash the writer simply takes the next free -N name.
-  base="$stamp-$sender"
-  target="$posts_dir/$base.md"
-  n=1
-  while ! ln -- "$landing" "$target" 2>/dev/null; do
-    [ -e "$target" ] || { rm -f -- "$landing"; die "cannot write $target"; }
-    n=$((n + 1))
-    [ "$n" -le 999 ] || { rm -f -- "$landing"; die "too many posts in one second"; }
-    base="$stamp-$sender-$n"
+  # link(2) fails if the target exists, so claiming a name is atomic. On a
+  # same-second clash with my own earlier post, wait for the next second and
+  # stamp again: the filename stays <date>-<time>-<sender>.md, so lexical
+  # order is still the order things were written. A directory post of the
+  # same id counts as taken too.
+  n=0
+  while :; do
+    base="$stamp-$sender"
     target="$posts_dir/$base.md"
+    if [ ! -e "$posts_dir/$base" ] && ln -- "$landing" "$target" 2>/dev/null; then
+      break
+    fi
+    [ -e "$target" ] || [ -e "$posts_dir/$base" ] \
+      || { rm -f -- "$landing"; die "cannot write $target"; }
+    n=$((n + 1))
+    [ "$n" -le 5 ] || { rm -f -- "$landing"; die "cannot claim a post name: the clock is not moving"; }
+    sleep 1
+    stamp=$(date -u +%Y%m%d-%H%M%S)
   done
   rm -f -- "$landing"
 
