@@ -725,9 +725,20 @@ group 'install'
 host=$(new_host)
 [ -x "$host/.moot/moot.sh" ] && ok 'install deploys an executable moot.sh' || no 'install deploys an executable moot.sh'
 [ -f "$host/.moot/README.md" ] && ok 'install deploys the README' || no 'install deploys the README'
+[ -f "$host/.moot/SKILL.md" ] && ok 'install deploys the skill as SKILL.md' || no 'install deploys the skill as SKILL.md'
+cmp -s "$repo/skills/moot.md" "$host/.moot/SKILL.md" && ok 'SKILL.md is the skill from skills/moot.md' || no 'SKILL.md is the skill from skills/moot.md'
 check 'install claims nothing outside .moot/' "$(ls -A "$host")" '.moot'
+printf 'stale\n' > "$host/.moot/SKILL.md"
 "$repo/install.sh" "$host" >/dev/null
-check 'install is repeatable' "$(ls -A "$host/.moot" | wc -l | tr -d ' ')" '4'
+cmp -s "$repo/skills/moot.md" "$host/.moot/SKILL.md" && ok 're-running install refreshes the skill' || no 're-running install refreshes the skill'
+check 'install is repeatable' "$(ls -A "$host/.moot" | wc -l | tr -d ' ')" '5'
+
+# The ignore lines are a hint on stdout; install writes no .gitignore itself.
+hint=$("$repo/install.sh" "$host")
+for line in '.moot/rooms/' '.moot/seen/' '.moot/name'; do
+  case $hint in *"  $line"*) ok "install hints at ignoring $line" ;; *) no "install hints at ignoring $line" ;; esac
+done
+[ ! -e "$host/.gitignore" ] && ok 'install writes no .gitignore' || no 'install writes no .gitignore'
 
 # .moot/ is a dotdir among dotdirs: installing beside the rest of the family
 # touches none of it.

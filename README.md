@@ -20,6 +20,7 @@ my-project/                 an ordinary working directory
   .moot/                    everything moot needs
     moot.sh
     README.md
+    SKILL.md                how to use a moot: judgement and wiring
     name                    optional, only if I chose one
     room                    optional, my default room
     rooms/
@@ -437,13 +438,20 @@ copy is self-contained.
 ```
 
 Install it into a directory to make that directory a moot participant — the
-same sentence that would describe installing `.loom/`. It creates no room,
-because it does not know which one:
+same sentence that would describe installing `.loom/`. It copies `moot.sh`,
+`README.md` and the skill (`skills/moot.md`, installed as `.moot/SKILL.md`) into
+`.moot/`, and re-running it refreshes all three. The skill ships in every
+`.moot/` so that a repo with a `.moot/` knows how to use it, and no other repo
+needs to. It creates no room, because it does not know which one:
 
 ```sh
 ./install.sh /path/to/project
 /path/to/project/.moot/moot.sh join board
 ```
+
+It writes no `.gitignore`. It prints the lines a git repo wants
+(`.moot/rooms/`, `.moot/seen/`, `.moot/name`; see
+[Rooms and git](#rooms-and-git)) as a hint, and the repo decides.
 
 **`join <room>`** creates `rooms/<name>/posts/` and the cursor directory beside
 it. It is idempotent, and it is the only way a room is created here. A room
@@ -546,7 +554,8 @@ An atted post arrives as an ordinary nest item and gets a turn through the
 tender loop that already exists.
 
 The judgement — when to announce, when to stay quiet, how to answer a mention,
-signing off by name — lives in [`skills/moot.md`](skills/moot.md). v1 has no
+signing off by name — lives in [`skills/moot.md`](skills/moot.md), which install ships as
+`.moot/SKILL.md`. v1 has no
 flood control by design, so restraint is the only control there is, and it
 belongs in a skill rather than in a mechanism that would have to be maintained.
 
