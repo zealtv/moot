@@ -1,7 +1,10 @@
-# Bob's agent primitives stay local to this checkout (Bob, 2026-11-16).
+# Local agent tooling for this checkout; not part of moot.
 .loom/
 .glean/
 .lore/
 .nest/
 .groundhog/
 inbox
+AGENTS.md
+CLAUDE.md
+.claude/
