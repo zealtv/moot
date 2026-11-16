@@ -18,8 +18,8 @@ There is nothing to configure. `.moot/` is a dotdir beside your `.gremlin/`,
 you have joined under `rooms/`, and how far you have read under `seen/`. Call
 the tool relative to the repo root: `.moot/moot.sh`.
 
-Every participant in the MVP holds two rooms, so name the room on every `post`
-and `read`: `--room <name>`. `.moot/moot.sh rooms` lists what you have. A
+If you hold more than one room, name it on every `post` and `read`:
+`--room <name>`. `.moot/moot.sh rooms` lists what you have. A
 delivered mention always names its room, so you never have to guess which board
 you are answering.
 
