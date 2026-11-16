@@ -42,10 +42,10 @@ and `post_ids()` follow links (README, "A room that is a symlink").
 2. **Tests**: two `.moot/`s sharing a room by symlink; same-second posts from
    both get distinct ids; each cursor advances independently; `catchup`
    in one never touches the other's `seen/`.
-3. **Joining a shared room.** Decide between documenting the plain
-   `ln -s <room-path> .moot/rooms/<name>` and a `join <room> --at <path>`
-   that makes the link and the cursor directory. Lean to the plain link
-   (zero code) unless the test shows `join` is needed for the cursor dir.
+3. **Joining a shared room: a plain `ln -s <room-path> .moot/rooms/<name>`.**
+   Settled 2026-11-16: the second review's trial showed `rooms` lists a
+   linked room and `catchup` creates `seen/<room>/` itself (`moot.sh:760`),
+   so no `join --at` is needed. Document the link.
 4. **Rooms that are clones stay out** of a shared room: many repos
    committing in one working tree race on `index.lock` (the review measured
    five "could not commit" warnings from six concurrent posts). Say so; the
@@ -64,9 +64,18 @@ and `post_ids()` follow links (README, "A room that is a symlink").
    - A human's `~/.moot` falls back to the home folder name, usually
      `$USER`, so little changes for them. Check the tests that rely on
      `$USER` and update the README's name-resolution paragraph.
-   - Two sessions in one repo share a name and a cursor; a run sets
-     `MOOT_NAME=<folder>-<run>` (`bopOS-v3.9`). Convention only, carried by
-     [[skill-in-moot]].
+   - **Open, for Bob: run names.** The plan said a run sets
+     `MOOT_NAME=<folder>-<run>` (`bopOS-v3.9`) so two readers in one repo
+     don't share a cursor. The second review measured the cost: `@bopOS`
+     reached a reader named `bopOS-v3.9` as `delivered:0`, and each new run
+     name starts with an empty cursor, replaying old `@all`s. Options:
+     (a) `@<folder>` also matches `<folder>-*`, with a test; (b) runs keep
+     the plain folder name, so a new run inherits the repo's cursor, and
+     sign the run in the body ("— bopOS v3.9"). Bob leaned to (a) on
+     2026-11-16, then asked why run names are needed at all. Claude
+     recommended (b) the same day: as far as the loom shows, only one agent
+     per repo reads the moot at a time, and two concurrent readers in one
+     repo would be trial evidence to act on later. Record Bob's answer here.
    - Hostnames (`bopOS.spectre`; `@` isn't filename-safe) matter only when
      a room crosses machines and two clones of one repo could write the same
      path. Then each machine sets its own uncommitted `.moot/name`. Out of
@@ -78,6 +87,10 @@ and `post_ids()` follow links (README, "A room that is a symlink").
    56-58) holds only when `.moot/` sits beside `.gremlin/` (`moot.sh:92`),
    which this shape makes true. Lines 15 and 32-33 predate the current
    layout.
+
+7. **More README text the plan contradicts** (second review): "synced by
+   accident" (~line 171), the containment passage (~249-261) and the
+   "Deliberately absent" shared-room row (~535). Rewrite them with item 1.
 
 ## Tie-off
 

@@ -22,10 +22,13 @@ that out the same day. Nothing here goes global.)
      orchestrator): catch up at natural points, not on a timer (session
      start, before a dispatch, a `pane-watch` exit, hand back). Pull only.
      `--deliver .nest/in/` stays optional (dev-room Q4).
-   - Names: the repo's folder name (shared-rooms item 5); a run adds
-     itself with `MOOT_NAME=<folder>-<run>` (`bopOS-v3.9`), stable across
-     wakes; two sessions in one repo pick distinct names, since a name is a
-     cursor.
+   - Names: the repo's folder name (shared-rooms item 5), and whatever
+     shared-rooms settles for runs.
+   - Every participant in the MVP holds two rooms, so `post` and `read`
+     always name `--room`.
+   - Drop the `subscribe` / clone-room section (`skills/moot.md:50-62` as of
+     `c193580`): the skill now ships in every `.moot/`, and clone rooms are
+     out of the shared-room shape (second review, 2026-11-16).
 3. Room conventions, as drafts for the trial to test:
    - `runs`: the status post format (orchestrator-room Q3): usage readings
      with their times, workers and harnesses, what's about to dispatch, run
@@ -41,8 +44,12 @@ that out the same day. Nothing here goes global.)
    `.moot/rooms/` and `.moot/seen/` ignore lines to the repo-setup step
    that installs moot, if the skill gains one (see repos-moot).
 
+5. `install.sh` prints the ignore lines a repo needs (`.moot/rooms/`,
+   `.moot/seen/`, `.moot/name`) rather than repo-setup gaining a step
+   (second review, 2026-11-16).
+
 ## Tie-off
 
-A fresh session in a repo with a `.moot/`, given only "check the dev room",
-finds the skill from the repo's notes, posts under the repo's name and
-catches up, with no extra coaching.
+`install.sh` ships the skill, the skill covers both wirings, and the
+template line is in ai-kit. The real check (a fresh session using `dev`
+uncoached) happens in [[repos-moot]].

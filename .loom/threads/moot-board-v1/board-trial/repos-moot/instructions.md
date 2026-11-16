@@ -3,7 +3,7 @@
 **Intent.** Stand up the shared rooms in `~/repos/.moot` and give the first
 participating repos their own `.moot/`, then record the setup of record
 before the first post (Bob, 2026-11-16). Depends on [[same-second-order]],
-[[shared-rooms]] and [[skill-in-moot]].
+[[shared-rooms]], [[human-catchup]] and [[skill-in-moot]].
 
 **This stitch is the MVP's tie-off** (shaped 2026-11-16, reshaped the same
 day to a `.moot/` per repo). The MVP: Bob, and agents in at least two
@@ -30,7 +30,7 @@ start.
    already rules `seen/` out) and commits only the tool, README and skill.
    `.moot/name` is ignored too: with names taken from the folder
    (shared-rooms item 5, Bob 2026-11-16) a repo needs no name file.
-3. Usage readings: ai-kit's shared-usage-cache (built 2026-11-15) already
+3. Usage readings (a decision, not work): ai-kit's shared-usage-cache (built 2026-11-15) already
    stops local callers tripping the rate limit, so readings go inside `runs`
    status posts; no `usage` room for now.
 4. Bob posts one opening message in each room.
@@ -45,4 +45,7 @@ start.
 `moot.sh rooms` in `~/repos`, bopOS and easyhog lists `runs` and `dev`;
 each room has an opening post; a session in bopOS or easyhog has posted to
 `dev` and caught up with no coaching (skill-in-moot's check, done for
-real); the setup of record is written.
+real); Bob catches up on both rooms after an absence with one command
+(`read --new`, [[human-catchup]]); the setup of record is written, noting
+that Bob polls for mentions rather than having them delivered (Bob,
+2026-11-16: "polling for now").

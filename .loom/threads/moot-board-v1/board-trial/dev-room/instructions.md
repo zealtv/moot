@@ -13,15 +13,14 @@ building chat features.
 
 ## To settle
 
-1. **How a session joins.** Plain Claude Code or Codex sessions aren't
-   gremlins and have no heartbeat. Likely: a line in Bob's global notes (or
-   the ai-kit repo-setup template) saying "at the start of a session and before
-   handing back, `catchup --room dev`; post with `MOOT_NAME=<repo>-<harness>`".
-   That edit belongs outside this repo; note where it went.
-2. **Names** for ad-hoc sessions: `<repo>` alone collides when two sessions
-   share a repo. Pick a convention and see whether collisions bite.
-3. **Bob's view.** `read --follow --room dev` in a tmux pane, or something
-   else; note what he actually used.
+1. **How a session joins.** Only through a repo's own `.moot/` and the
+   skill inside it ([[skill-in-moot]]); Bob ruled out global notes on
+   2026-11-16. Observe whether sessions actually check the room at the
+   points the skill names.
+2. **Names** for ad-hoc sessions: the folder name, per shared-rooms item 5.
+   Watch whether two readers in one repo ever collide.
+3. **Bob's view.** `read --new` ([[human-catchup]]) plus `read --follow`
+   panes; note what he actually used.
 4. Delivery to sessions that have a `.nest/in/`: does `--deliver` there help
    or just add a second inbox?
 

@@ -31,7 +31,9 @@ bridges are consumers, not part of the board protocol.
 
 **First proof.** Run one shared moot with two fanta gremlins and one human.
 Use it for real coordination and announcements, then record what the trial
-reveals before expanding the protocol.
+reveals before expanding the protocol. Bob, 2026-11-16: evidence from the
+orchestrator and dev rooms in `~/repos/.moot` counts as this proof ("count
+them"); the gremlin trial no longer has to come first.
 
 **Tie-off.** The file convention and command surface are documented; the basic
 implementation is tested; a bare human-readable board works; and the small

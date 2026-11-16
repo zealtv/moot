@@ -46,3 +46,9 @@ Don't create, rename or change the visibility of any GitHub repo without Bob.
 
 The first tagged release is on the public repo, produced by the release
 tool, and the public tree passes its self-contained test.
+
+## Timing (second Fable review, 2026-11-16)
+
+Renaming `~/repos/moot` to `moot-dev` changes paths cited in `repos-moot`
+(`~/repos/moot/install.sh`). Do it before the MVP work starts or well
+after it ties, not during.

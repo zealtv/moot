@@ -31,3 +31,9 @@ public text free of lore/loom/glean ids (`loom:public-split`).
 
 The README states the format and the tool; the reasoning that came out of it
 lives in a dated lore record.
+
+## Added 2026-11-16 (second Fable review; Bob approved)
+
+Fold in these removals: `.moot/room`, `$MOOT_ROOM` and `init --room`
+(every MVP participant holds two rooms, so the sole-room default never
+fires; document `--room`), and `--json` on `init`/`join`.

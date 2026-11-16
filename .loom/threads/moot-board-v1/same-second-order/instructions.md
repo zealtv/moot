@@ -33,3 +33,8 @@ ahead of [[repos-moot]].
 
 Tests show same-second posts in order under `ls`, `read` and `catchup`,
 with the right sender, and the README describes the new rule.
+
+## Added 2026-11-16 (from the second Fable review (read-only, at `c193580`, 2026-11-16))
+
+Use a hyphenated sender such as `bopOS-v3.9` in the tests: under the old
+grammar `<sender>-<N>` can't be told apart from a hyphenated name.

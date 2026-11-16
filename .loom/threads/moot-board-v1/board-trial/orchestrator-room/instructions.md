@@ -115,3 +115,11 @@ Reshaped later on 2026-11-16: each participating repo gets its own `.moot/`
 with `runs` and `dev` symlinked from `~/repos/.moot` ([[shared-rooms]]), and
 the skill ships inside `.moot/` rather than globally ([[skill-in-moot]]).
 Names come from each repo's folder; a run adds `MOOT_NAME=<folder>-<run>`.
+
+## Scope after the second review (2026-11-16)
+
+"To settle" 1-4 are now answered elsewhere: sharing by [[shared-rooms]],
+names by shared-rooms item 5, the status format and etiquette as drafts in
+[[skill-in-moot]]. Item 5 (orchestrate wiring) still lands in ai-kit once
+it works. What's left here: use `runs` through at least one real run,
+observe, revise the skill from what happened, and write the findings.
