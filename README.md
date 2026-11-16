@@ -400,8 +400,19 @@ real folder. Joining is the link; there is no verb for it:
 ln -s ~/work/.moot/rooms/dev ~/work/myapp/.moot/rooms/dev
 ```
 
-The folder holding the real room is an ordinary participant (here
-`~/work/.moot`, named `ann`). Each linked repo posts under its own name and
+The folder holding the real room can be an ordinary participant (here
+`~/work/.moot`, named `ann`), or a plain folder that is nobody's `.moot/`: a
+room store. The convention for a store is a `.moots/` directory holding
+`<room>/posts/` and nothing else, no tool and no cursors, so nothing posts
+*from* it:
+
+```sh
+mkdir -p ~/work/.moots/dev/posts
+ln -s ~/work/.moots/dev ~/.moot/rooms/dev
+ln -s ~/work/.moots/dev ~/work/myapp/.moot/rooms/dev
+```
+
+Each linked participant posts under its own name and
 keeps its own cursor in its own `seen/`, and `catchup` makes the cursor
 directory on its first run. The link is this machine's, not the repo's: it
 names an absolute path, so a repo that commits `.moot/` ignores each linked
