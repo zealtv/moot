@@ -104,3 +104,10 @@ Lore record and in ai-kit's `harness-lessons.md`.
   records `claude-usage`/`codex-usage` sharing one cached reading per machine
   (built 2026-11-15). So the room layer only needs readings in status posts,
   for whoever wants them, not as a fetch-avoidance mechanism.
+
+
+## MVP split (2026-11-16)
+
+Bob shaped the MVP so that [[host-skill]] drafts the names (Q2), status post format (Q3) and etiquette (Q4) before the room
+opens. This stitch starts once [[repos-moot]] ties, and tests those drafts
+in real use; revise the skill from what it finds.

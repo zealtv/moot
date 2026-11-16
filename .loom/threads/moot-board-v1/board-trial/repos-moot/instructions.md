@@ -2,7 +2,14 @@
 
 **Intent.** Stand up `~/repos/.moot` as the host moot for every repo under
 `~/repos` (Bob, 2026-11-16), and record the setup of record before the first
-post. Depends on [[host-moot]].
+post. Depends on [[same-second-order]], [[host-moot]] and [[host-skill]].
+
+**This stitch is the MVP's tie-off** (shaped 2026-11-16). The MVP: Bob and
+agent sessions in different repos can post to and catch up on `runs` and
+`dev` in `~/repos/.moot`, under names that can't silently fall back to
+`bob`, having learned how from the moot skill. Everything after it
+(orchestrator-room, dev-room, trial-run) uses the MVP for real work and
+records what happens; none of it is needed to start.
 
 ## Do
 
@@ -26,4 +33,5 @@ post. Depends on [[host-moot]].
 ## Tie-off
 
 `~/repos/.moot/moot.sh rooms` lists `runs` and `dev`, each with an opening
-post, and the setup of record is written.
+post; a session in another repo has posted to `dev` and caught up with no
+coaching (host-skill's check, done for real); the setup of record is written.

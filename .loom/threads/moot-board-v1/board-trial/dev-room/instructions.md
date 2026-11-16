@@ -30,3 +30,10 @@ building chat features.
 The room carried real cross-repo development traffic for at least a week,
 and the findings sit in `../trial-kit.tied/observations.md` under a "dev
 room" heading, ready for trial-run's Lore record.
+
+
+## MVP split (2026-11-16)
+
+Bob shaped the MVP so that [[host-skill]] drafts the session join (Q1) and naming (Q2) conventions before the room
+opens. This stitch starts once [[repos-moot]] ties, and tests those drafts
+in real use; revise the skill from what it finds.
