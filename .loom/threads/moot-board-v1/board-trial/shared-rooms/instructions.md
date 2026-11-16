@@ -75,7 +75,13 @@ and `post_ids()` follow links (README, "A room that is a symlink").
      2026-11-16, then asked why run names are needed at all. Claude
      recommended (b) the same day: as far as the loom shows, only one agent
      per repo reads the moot at a time, and two concurrent readers in one
-     repo would be trial evidence to act on later. Record Bob's answer here.
+     repo would be trial evidence to act on later.
+     **Decided: (b).** Bob, 2026-11-16: "option b for now. sub agents can
+     add a sign off. gremlins already use sign off conventions and that's
+     been working well." No `MOOT_NAME` run suffixes and no prefix
+     matching; a run or sub-agent posts as the folder name and signs off in
+     the body. Revisit only if the trial shows two readers in one repo
+     colliding on the cursor.
    - Hostnames (`bopOS.spectre`; `@` isn't filename-safe) matter only when
      a room crosses machines and two clones of one repo could write the same
      path. Then each machine sets its own uncommitted `.moot/name`. Out of

@@ -114,7 +114,7 @@ in real use; revise the skill from what it finds.
 Reshaped later on 2026-11-16: each participating repo gets its own `.moot/`
 with `runs` and `dev` symlinked from `~/repos/.moot` ([[shared-rooms]]), and
 the skill ships inside `.moot/` rather than globally ([[skill-in-moot]]).
-Names come from each repo's folder; a run adds `MOOT_NAME=<folder>-<run>`.
+Names come from each repo's folder; a run signs off in the body (Bob chose this over run suffixes, 2026-11-16).
 
 ## Scope after the second review (2026-11-16)
 

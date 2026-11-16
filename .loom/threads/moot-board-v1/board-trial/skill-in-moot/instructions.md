@@ -22,8 +22,11 @@ that out the same day. Nothing here goes global.)
      orchestrator): catch up at natural points, not on a timer (session
      start, before a dispatch, a `pane-watch` exit, hand back). Pull only.
      `--deliver .nest/in/` stays optional (dev-room Q4).
-   - Names: the repo's folder name (shared-rooms item 5), and whatever
-     shared-rooms settles for runs.
+   - Names: the repo's folder name (shared-rooms item 5). A run or a
+     sub-agent posts under that name and signs off in the body ("— bopOS
+     v3.9 orchestrator"), as gremlins already do (Bob, 2026-11-16: "gremlins
+     already use sign off conventions and that's been working well"). One
+     reader per repo at a time; say so.
    - Every participant in the MVP holds two rooms, so `post` and `read`
      always name `--room`.
    - Drop the `subscribe` / clone-room section (`skills/moot.md:50-62` as of
