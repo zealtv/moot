@@ -94,3 +94,13 @@ Two orchestrators in different repos have shared one room through at least
 one real run, posting status and requests in the agreed format, and the
 findings (what helped, what flooded, what got missed) are written down, in a
 Lore record and in ai-kit's `harness-lessons.md`.
+
+## Update, 2026-11-16
+
+- Bob wants the room at `~/repos/.moot` (room `runs`), shared with a `dev`
+  room. [[host-moot]] takes over question 1 and the `setup.md` conflict;
+  [[repos-moot]] stands the room up. This stitch now depends on repos-moot.
+- The machine-local usage layer exists: ai-kit's `shared-usage-cache` stitch
+  records `claude-usage`/`codex-usage` sharing one cached reading per machine
+  (built 2026-11-15). So the room layer only needs readings in status posts,
+  for whoever wants them, not as a fetch-avoidance mechanism.
