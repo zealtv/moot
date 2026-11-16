@@ -74,14 +74,17 @@ results in a nest receipt as `lore:<id>`, `glean:<id>`, `loom:<id>` or
 
 ## Publishing
 
-Shape: **split**, chosen by Bob on 2026-11-16 (see
-`~/repos/ai-kit/skills/repo-setup/reference/public-release.md`). Development
-and the dotdirs live in the private `moot-dev` (Bob named it, 2026-11-16);
-releases go to a public `moot`. As of 2026-11-16 the split hasn't happened:
-this checkout's `origin` is still the private `zealtv/moot`, and
-`loom:public-split` holds the open questions and the release mechanics.
-Public files (`README.md`, `moot.sh`, `install.sh`, `skills/`, `test/`)
-don't cite `lore:`/`loom:`/`glean:` ids or private paths.
+Shape: **public, primitives local**. Bob, 2026-11-16, reversing his
+`split` choice from earlier that day: moot "should be just a public repo,
+just like nestlings, groundhog, etc. But let's not track the dot folders".
+So `zealtv/moot` is the one repo, and `.loom/`, `.glean/`, `.lore/`,
+`.nest/`, `.groundhog/` and the `inbox` link are in `.gitignore`: they live
+only in this checkout, with no remote backup. Commits before 2026-11-16
+still carry earlier `.loom/` (and a few `.glean/`, `.lore/`, `.nest/`) files;
+Bob judged that history fine after a scan that day found no secrets,
+absolute home paths or real email addresses in any file.
+
+This file is public. Write it, and everything tracked, as public text.
 
 Ask Bob before any push, tag, release or visibility change. When he asks to
 commit and push, push straight to `main` (`glean:commit-to-main-directly`).
