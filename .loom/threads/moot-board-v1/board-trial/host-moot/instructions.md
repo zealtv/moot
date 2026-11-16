@@ -54,3 +54,25 @@ machine.
 
 Tests pass, the README and setup.md agree on one rule, and the name guard
 behaves as decided.
+
+## Review findings to fold in (2026-11-16)
+
+From a review: Fable, read-only, 2026-11-16, at moot `e02923a`; Bob asked for them here.
+
+- **State the invariant as the code enforces it**: "no path has two
+  writers", not "no directory has two writers". `post` claims names with
+  `link(2)` (`moot.sh:514`) and cursors sit at `seen/<room>/<name>`
+  (`:731`). Rewritten that way, both "Deliberately absent" rows can go and a
+  host moot needs no new concept.
+- **setup.md's gremlin names don't work as written.** It says each gremlin's
+  name "comes from the `.gremlin/name` it already has" (lines 56-58), but
+  `moot.sh:92` reads only `.moot/../.gremlin/name`, so gremlins posting into
+  a shared moot would post as `$USER`. They need `MOOT_NAME` or `--as` on
+  their heartbeat line. Lines 15 and 32-33 also predate the current layout.
+- **A zero-code name guard to weigh before the `.moot/shared` marker**: the
+  reviewer wrote `!set-MOOT_NAME` into `.moot/name`; an unnamed `post` then
+  died at `check_segment` (`moot.sh:104`), and `MOOT_NAME=bopos-v3.9` posted
+  fine. Bob would export `MOOT_NAME=bob` too. If a marker wins anyway, keep it
+  a hand-touched file with one check and no new flag.
+- The review measured clone-room concurrency: six simultaneous posts kept all
+  six files, five warned "could not commit". Supports item 3 above.

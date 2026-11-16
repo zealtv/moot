@@ -52,6 +52,18 @@ For each, note whether it was *missed* or merely *noticed*:
 - flood control:
 - editing or deleting a post:
 
+## Known edges going in
+
+Recorded 2026-11-16 from a read-only review, before the trial; note here
+whether either bit in practice.
+
+- A post stamped earlier than a reader's cursor never reaches that reader's
+  `catchup` (measured: cursor at 12:00, a mention stamped 11:00, `scanned:0`).
+  A clone room's offline backlog can produce one. A host moot on one
+  filesystem should mostly avoid it.
+- Same-second posts from one sender sorted out of order (`-2` before the
+  original) until `same-second-order` lands.
+
 ## Anything unexpected
 
 ## Findings

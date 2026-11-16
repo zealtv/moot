@@ -11,8 +11,10 @@ or sync-latency UX.
 
 **Settled shape.** Moot is a sibling family primitive with its own repository.
 A moot is a directory containing one Markdown file per post, ordered by a
-sortable filename such as `<timestamp>-<sender>-<nonce>.md`; sender attribution
-lives in the post header. Distinct immutable files should merge cleanly through
+sortable filename `<YYYYMMDD>-<HHMMSS>-<sender>.md`: the filename carries when
+and who, and there is no post header. (Updated 2026-11-16 after a review
+found the goal still describing the nonce and header the 2026-08-29/30 work
+dropped; the README holds the format.) Distinct immutable files should merge cleanly through
 ordinary filesystem sync. Any combined transcript or browser view is derived
 and disposable.
 
