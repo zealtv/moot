@@ -378,7 +378,7 @@ first=$("$room/.moot/moot.sh" read | grep 'body ' | head -1)
 last=$("$room/.moot/moot.sh" read | grep 'body ' | tail -1)
 check 'read is newest-last: oldest first' "$first" 'body 20260828-235959'
 check 'read is newest-last: newest last'  "$last"  'body 20260830-010000'
-case $("$room/.moot/moot.sh" read | grep -m1 '──') in *'2026-08-28 23:59:59 UTC · bob'*) ok 'the heading is built from the filename' ;; *) no 'the heading is built from the filename' ;; esac
+case $(TZ=UTC0 "$room/.moot/moot.sh" read | grep -m1 '──') in *'2026-08-28 23:59:59 +0000 · bob'*) ok 'the heading is built from the filename' ;; *) no 'the heading is built from the filename' ;; esac
 
 group 'read --since and --tail'
 check '--since is exclusive of its own post' \
@@ -803,6 +803,106 @@ check "one repo's catchup leaves another's cursor alone" "$(ls -A "$parent/bopOS
 out_b=$(b catchup --json)
 check 'the other repo still gets its own mentions' "$(printf '%s' "$out_b" | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":2'
 check 'and a second sweep delivers nothing twice' "$(b catchup --json | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":0'
+
+# ---------------------------------------------------------------- local time
+
+group 'read headings are in local time'
+room=$(new_room)
+posts="$room/.moot/rooms/board/posts"
+printf 'late\n' > "$posts/20260828-233000-tengu.md"
+head_of() { "$room/.moot/moot.sh" read | grep -m1 '──'; }
+# POSIX zone strings, so the test needs no zoneinfo: XXX-11 is UTC+11.
+case $(TZ=XXX-11 head_of) in *'2026-08-29 10:30:00 +1100 · tengu'*) ok 'a +1100 reader sees the next day, 10:30' ;; *) no 'a +1100 reader sees the next day, 10:30' "$(TZ=XXX-11 head_of)" ;; esac
+case $(TZ=XXX+5 head_of) in *'2026-08-28 18:30:00 -0500 · tengu'*) ok 'a -0500 reader sees 18:30 the same day' ;; *) no 'a -0500 reader sees 18:30 the same day' "$(TZ=XXX+5 head_of)" ;; esac
+case $(TZ=XXX-11 head_of) in *UTC*) no 'a local heading does not say UTC' ;; *) ok 'a local heading does not say UTC' ;; esac
+[ -e "$posts/20260828-233000-tengu.md" ] && ok 'the filename stays UTC' || no 'the filename stays UTC'
+printf 'odd\n' > "$posts/notastamp-tengu.md"
+case $("$room/.moot/moot.sh" read --tail 1 | grep -m1 '──') in *' UTC · tengu'*) ok 'an id that is not a stamp falls back to UTC, not an error' ;; *) no 'an id that is not a stamp falls back to UTC, not an error' ;; esac
+
+# ---------------------------------------------------------------- read --new
+
+group 'read --new'
+parent=$(mktemp -d "$work/new.XXXXXX")
+mkdir -p "$parent/bob"
+"$repo/install.sh" "$parent/bob" >/dev/null
+m() { ( cd "$work" && MOOT_NAME= TZ=XXX-11 "$parent/bob/.moot/moot.sh" "$@" ); }
+m join runs >/dev/null; m join dev >/dev/null
+rp() { printf '%s\n' "$2" > "$parent/bob/.moot/rooms/$1/posts/$3.md"; }
+rp runs 'run one done' 20260829-100000-tengu
+rp runs '@bob please look' 20260829-110000-tengu
+rp dev  'dev note' 20260829-103000-easyhog
+
+out=$(m read --new)
+check 'read --new with several rooms and no --room needs no choice' "$(printf '%s' "$out" | grep -c 'run one done')" '1'
+check 'it shows every post, not just mentions' "$(printf '%s' "$out" | grep -c -e 'run one done' -e 'dev note' -e 'please look')" '3'
+check 'each room gets a heading with its count' "$(printf '%s' "$out" | grep -c -e '══ dev · 1 new ══' -e '══ runs · 2 new ══')" '2'
+check 'rooms stay separate: dev comes before runs, not interleaved by time' \
+  "$(printf '%s' "$out" | grep -e 'dev note' -e 'run one' -e 'please look' | tr '\n' '|')" 'dev note|run one done|@bob please look|'
+case $out in *'2026-08-29 21:00:00 +1100 · tengu'*) ok 'headings are in local time' ;; *) no 'headings are in local time' ;; esac
+check 'the cursors moved to the newest post in each room' \
+  "$(cat "$parent/bob/.moot/seen/runs/bob") $(cat "$parent/bob/.moot/seen/dev/bob")" \
+  '20260829-110000-tengu 20260829-103000-easyhog'
+check 'a second call shows nothing new' "$(m read --new)" 'nothing new for bob'
+
+rp runs 'run two done' 20260829-120000-tengu
+out=$(m read --new)
+check 'a later call shows only what arrived since' "$(printf '%s' "$out" | grep -c -e 'run two done' -e 'run one done' -e 'dev note')" '1'
+check 'and only the room that changed gets a heading' "$(printf '%s' "$out" | grep -c '══')" '1'
+
+# Plain read never touches the cursor.
+rp runs 'run three done' 20260829-130000-tengu
+m read --room runs >/dev/null
+check 'plain read leaves the cursor alone' "$(cat "$parent/bob/.moot/seen/runs/bob")" '20260829-120000-tengu'
+check 'so --new still shows what read showed' "$(m read --new | grep -c 'run three done')" '1'
+
+# --room narrows; the other room's cursor stays put.
+rp runs 'run four done' 20260829-140000-tengu
+rp dev  'dev two' 20260829-141000-easyhog
+out=$(m read --new --room dev)
+check '--new --room shows that room only' "$(printf '%s' "$out" | grep -c -e 'dev two' -e 'run four')" '1'
+check "and leaves the other room's cursor" "$(cat "$parent/bob/.moot/seen/runs/bob")" '20260829-130000-tengu'
+
+# The cursor is shared with catchup, in both directions.
+check 'catchup starts from the cursor --new left: it scans only what --new did not show' \
+  "$(m catchup --json | grep -o '"scanned":[0-9]*' | tr '\n' ' ')" '"scanned":0 "scanned":1 '
+rp runs '@bob after catchup' 20260829-150000-tengu
+rp runs 'plain after catchup' 20260829-151000-tengu
+m catchup >/dev/null
+check 'catchup moves the cursor --new reads' "$(cat "$parent/bob/.moot/seen/runs/bob")" '20260829-151000-tengu'
+check 'so --new shows nothing catchup already passed' "$(m read --new)" 'nothing new for bob'
+rp runs '@bob before new' 20260829-160000-tengu
+m read --new >/dev/null
+check "and --new moves the cursor catchup reads: it finds nothing" "$(m catchup --json | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":0'
+
+# Names: --as picks the cursor; another name has its own.
+check 'another name starts from the top' "$(m read --new --as tengu | grep -c '══')" '2'
+check 'and keeps its own cursor' "$(m read --new --as tengu)" 'nothing new for tengu'
+
+# Options that fight the cursor are refused, not ignored.
+for opt in '--since x' '--tail 1' '--follow'; do
+  # shellcheck disable=SC2086
+  m read --new $opt >/dev/null 2>&1; rc=$?
+  [ "$rc" -ne 0 ] && ok "--new refuses $opt" || no "--new refuses $opt"
+done
+m read --room runs --as bob >/dev/null 2>&1 && no '--as without --new is refused' || ok '--as without --new is refused'
+m read --new --room nonesuch >/dev/null 2>&1 && no '--new --room of an unknown room fails' || ok '--new --room of an unknown room fails'
+
+# A room that cannot take a cursor still reads, and says so.
+ro=$(new_room)
+printf 'hello\n' > "$ro/.moot/rooms/board/posts/20260829-100000-tengu.md"
+chmod a-w "$ro/.moot/seen/board" 2>/dev/null
+if [ -w "$ro/.moot/seen/board" ]; then
+  ok '(skipped: running as a user who can write anywhere)'
+else
+  err=$("$ro/.moot/moot.sh" read --new --as bob 2>&1 >/dev/null)
+  check 'a read-only cursor still shows the post' "$("$ro/.moot/moot.sh" read --new --as bob 2>/dev/null | grep -c hello)" '1'
+  check 'and warns that it will show again' "$(printf '%s' "$err" | grep -c 'read-only room')" '1'
+fi
+chmod u+w "$ro/.moot/seen/board" 2>/dev/null
+
+# No rooms at all is not an error.
+bare=$(new_host)
+check 'read --new with no rooms says nothing new and succeeds' "$("$bare/.moot/moot.sh" read --new --as bob)" 'nothing new for bob'
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

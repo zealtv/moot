@@ -56,14 +56,16 @@ moot — a directory of messages
   moot.sh rooms
   moot.sh post [--json] [--as <name>] [--room <name>] [-m <text> | -f <file> | -]
   moot.sh read [--room <name>] [--since <post-id>] [--tail <n>] [--follow]
+  moot.sh read --new [--as <name>] [--room <name>]
   moot.sh catchup [--json] [--as <name>] [--room <name>] [--deliver <dir>]
 
 A post is <YYYYMMDD>-<HHMMSS>-<sender>.md in rooms/<room>/posts/, UTC, plain
 Markdown. Posts are immutable: there is no edit and no delete. A correction is
 a new post.
 
-post and read are aimed at one room; catchup sweeps every room here unless
---room narrows it.
+post and read are aimed at one room; catchup and read --new sweep every room
+here unless --room narrows it. read prints times in local time; the filenames
+stay UTC.
 
 join makes a room here; subscribe clones one that already exists elsewhere,
 where rooms/<room>/ is the clone and its git remote is the room's address.
@@ -584,16 +586,34 @@ render_body() {
   fi
 }
 
+# "YYYY-MM-DD HH:MM:SS +ZZZZ" for a post's UTC day and time, in the reader's
+# own zone. Display only: the filename stays UTC, and nothing is written back.
+# GNU date takes -d, BSD date takes -j -f and -r; whichever answers wins, and a
+# date with neither (or an id that is not a stamp) falls back to the stamp as
+# written, labelled UTC, so a heading is never wrong, only less friendly.
+local_stamp() {
+  local day=$1 time=$2 epoch out
+  case $day$time in *[!0-9]* | '') return 1 ;; esac
+  [ ${#day} = 8 ] && [ ${#time} = 6 ] || return 1
+  epoch=$(date -u -d "${day:0:4}-${day:4:2}-${day:6:2} ${time:0:2}:${time:2:2}:${time:4:2}" +%s 2>/dev/null) \
+    || epoch=$(date -j -u -f '%Y%m%d%H%M%S' "$day$time" +%s 2>/dev/null) \
+    || return 1
+  out=$(date -d "@$epoch" '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null) \
+    || out=$(date -r "$epoch" '+%Y-%m-%d %H:%M:%S %z' 2>/dev/null) \
+    || return 1
+  printf '%s' "$out"
+}
+
 render_post() {
-  local id=$1 body dim reset day time sender rest
+  local id=$1 body dim reset day time sender rest when
   day=${id%%-*}; rest=${id#*-}
   time=${rest%%-*}; sender=${rest#*-}
   dim=''; reset=''
   if [ "$colour_on" = 1 ]; then dim=$(printf '\033[2m'); reset=$(printf '\033[0m'); fi
 
-  printf '\n%s── %s-%s-%s %s:%s:%s UTC · %s ──%s\n\n' \
-    "$dim" "${day:0:4}" "${day:4:2}" "${day:6:2}" \
-    "${time:0:2}" "${time:2:2}" "${time:4:2}" "$sender" "$reset"
+  when=$(local_stamp "$day" "$time") \
+    || when="${day:0:4}-${day:4:2}-${day:6:2} ${time:0:2}:${time:2:2}:${time:4:2} UTC"
+  printf '\n%s── %s · %s ──%s\n\n' "$dim" "$when" "$sender" "$reset"
 
   body=$(post_body_path "$id")
   if [ -r "$body" ]; then
@@ -615,8 +635,68 @@ render_post() {
   fi
 }
 
+# The cursor, shared by catchup and read --new: .moot/seen/<room>/<name>, one
+# post id, written by that name alone. cursor_get prints it (nothing if there is
+# none yet); cursor_put returns non-zero when the room's seen/ cannot be written.
+cursor_get() {
+  local file="$seen_dir/$1/$2"
+  [ -r "$file" ] || return 0
+  head -n 1 -- "$file" | tr -d '[:space:]'
+}
+
+cursor_put() {
+  mkdir -p -- "$seen_dir/$1" 2>/dev/null \
+    && printf '%s\n' "$3" > "$seen_dir/$1/$2" 2>/dev/null
+}
+
+# read --new: everything since this reader's cursor, room by room, then the
+# cursor moves. Rooms stay separate, each under its own heading; there is no
+# merged timeline. It is the human's counterpart to catchup: catchup prints (or
+# delivers) only what mentions me, this prints everything, mentions highlighted
+# as read always does. Both move the one cursor.
+read_new() {
+  local as=$1 room_opt=$2 r me id cursor newest shown=0
+  local rooms=()
+  if [ -n "$room_opt" ]; then
+    check_segment 'room name' "$room_opt"
+    [ -d "$rooms_dir/$room_opt" ] || die "no room $room_opt here (run: $0 join $room_opt)"
+    rooms=("$room_opt")
+  else
+    while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms)
+  fi
+  me=$(resolve_name "$as")
+  init_colour
+
+  local head_on='' head_off=''
+  if [ "$colour_on" = 1 ]; then head_on=$(printf '\033[1m'); head_off=$(printf '\033[0m'); fi
+
+  for r in ${rooms[@]+"${rooms[@]}"}; do
+    use_room "$r"
+    [ -d "$posts_dir" ] || continue
+    cursor=$(cursor_get "$room" "$me")
+    local new=()
+    newest=
+    while IFS= read -r id; do
+      newest=$id
+      if [ -z "$cursor" ] || [ "$id" \> "$cursor" ]; then new+=("$id"); fi
+    done < <(post_ids)
+    [ ${#new[@]} -gt 0 ] || continue
+
+    printf '\n%s══ %s · %s new ══%s\n' "$head_on" "$room" "${#new[@]}" "$head_off"
+    for id in "${new[@]}"; do render_post "$id"; done
+    shown=$((shown + ${#new[@]}))
+
+    if ! cursor_put "$room" "$me" "$newest"; then
+      printf 'moot: cannot write %s (read-only room); the next --new will show these again\n' \
+        ".moot/seen/$room/$me" >&2
+    fi
+  done
+
+  if [ "$shown" = 0 ]; then printf 'nothing new for %s\n' "$me"; else printf '\n'; fi
+}
+
 cmd_read() {
-  local since= tail_n= follow=0 room_opt= id last=
+  local since= tail_n= follow=0 room_opt= id last= new=0 as=
 
   while [ $# -gt 0 ]; do
     case $1 in
@@ -625,10 +705,20 @@ cmd_read() {
       --tail)  [ $# -ge 2 ] || die "--tail needs a count"; tail_n=$2; shift 2
                case $tail_n in ''|*[!0-9]*) die "--tail needs a number" ;; esac ;;
       --follow) follow=1; shift ;;
+      --new)   new=1; shift ;;
+      --as)    [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
       -h|--help) usage; return 0 ;;
       *) die "unknown option for read: $1" ;;
     esac
   done
+
+  if [ "$new" = 1 ]; then
+    [ -z "$since$tail_n" ] && [ "$follow" = 0 ] \
+      || die "--new cannot be combined with --since, --tail or --follow: its cursor decides what is new"
+    read_new "$as" "$room_opt"
+    return 0
+  fi
+  [ -z "$as" ] || die "--as only goes with --new"
 
   use_room "$room_opt"
   [ -d "$posts_dir" ] || die "no posts/ in room $room (run: $0 join $room)"
@@ -747,8 +837,7 @@ deliver_post() {
 # reports once however many rooms it visited.
 catchup_room() {
   local me=$1 deliver=$2 json=$3 id
-  local cursor_file="$seen_dir/$room/$me" cursor=
-  [ -r "$cursor_file" ] && cursor=$(head -n 1 -- "$cursor_file" | tr -d '[:space:]')
+  local cursor; cursor=$(cursor_get "$room" "$me")
 
   local ids=() new=() newest=
   while IFS= read -r id; do ids+=("$id"); done < <(post_ids)
@@ -776,7 +865,7 @@ catchup_room() {
   # divergent copies reconcile on posts/ alone.
   local cursor_written=0
   if [ -n "$newest" ] && [ "$newest" != "$cursor" ]; then
-    if mkdir -p -- "$seen_dir/$room" 2>/dev/null && printf '%s\n' "$newest" > "$cursor_file" 2>/dev/null; then
+    if cursor_put "$room" "$me" "$newest"; then
       cursor_written=1
     else
       # A room reachable read-only is a normal way to run: delivery is still
