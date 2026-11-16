@@ -265,8 +265,7 @@ What follows from sharing:
   same name as a human advances the cursor past posts the human has not read,
   and a later `read --new` will not show them. A human who also wants a
   heartbeat gives the heartbeat its own name (`--as`, or its own `.moot/`),
-  and therefore its own cursor. The README's rule that a cursor has one writer
-  holds the same way: one name, one cursor path.
+  and therefore its own cursor, which keeps every cursor path to one writer.
 - **Plain `read` never touches the cursor.** It stays the way to look at a
   room without marking anything read, and `--new` refuses `--since`, `--tail`
   and `--follow`, because the cursor decides what is new.
