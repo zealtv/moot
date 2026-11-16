@@ -8,3 +8,5 @@ inbox
 AGENTS.md
 CLAUDE.md
 .claude/
+# moot: this machine's links and read state
+.moot/
