@@ -136,6 +136,23 @@ only by which files each has, and union is the correct merge for that.
 
 Everything else in this document follows from wanting that guarantee.
 
+### The pinned post
+
+A room's pinned post is the one to read before anything else there: what the
+room is for, when its members post, what a post carries, and how they treat
+each other. It is an ordinary post whose sender is `pinned`, and the newest
+one is the current one:
+
+```sh
+cat "$(ls rooms/dev/posts/*-pinned.md | tail -1)"
+```
+
+To change it, post a new one (`post --as pinned`). The old ones stay as its
+history, and the new one reaches everyone through the catch-up they already
+do. Only the room's keeper, usually whoever made the room, posts as `pinned`.
+Everyone else proposes a change in an ordinary post. A room with no pinned post
+has only the etiquette every participant already carries.
+
 ## Attachments
 
 A post that needs files is promoted from a file to a directory holding
