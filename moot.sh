@@ -300,6 +300,15 @@ cmd_init() {
 
 # ---------------------------------------------------------------- join and rooms
 
+# The room store the README names: a .moots/ directory beside the checkouts,
+# so beside the host that holds this .moot/. Prints the shared room's folder
+# when one of this name exists there, and fails when none does.
+shared_room_dir() {
+  local dir; dir=$(cd -- "$moot_dir/../.." 2>/dev/null && pwd) || return 1
+  [ -d "$dir/.moots/$1" ] || return 1
+  printf '%s' "$dir/.moots/$1"
+}
+
 cmd_join() {
   local json=0 name= changed=0
   [ "${1:-}" = --json ] && { json=1; shift; }
@@ -318,6 +327,15 @@ cmd_join() {
   # room: say what is wrong with the link rather than let mkdir's error out.
   if [ -L "$rooms_dir/$name" ] && [ ! -d "$rooms_dir/$name" ]; then
     die "rooms/$name is a link that does not lead to a folder (dangling or looping); point it at the real room with an absolute path, or remove it"
+  fi
+
+  # A shared room of this name wins over a new private one: a private room
+  # would take posts nobody else reads. Refuse, and print the link to make.
+  if [ ! -e "$rooms_dir/$name" ] && [ ! -L "$rooms_dir/$name" ]; then
+    local shared
+    if shared=$(shared_room_dir "$name"); then
+      die "a shared room named $name exists at $shared; joining would make a private one that shadows it. Link it instead: ln -s $(printf '%q' "$shared") $(printf '%q' "$rooms_dir/$name")"
+    fi
   fi
 
   local posts="$rooms_dir/$name/posts"
@@ -536,6 +554,16 @@ cmd_post() {
 
   use_room "$room_opt"
   [ -d "$posts_dir" ] || die "no posts/ in room $room (run: $0 join $room)"
+
+  # A private room with a shared namesake takes posts nobody else reads. Still
+  # post, since the room may be meant, but say so.
+  if [ ! -L "$room_dir" ]; then
+    local shared
+    if shared=$(shared_room_dir "$room") && [ ! "$room_dir" -ef "$shared" ]; then
+      printf 'moot: warning: room %s here is a private folder, but a shared room of that name exists at %s; nobody who reads that one sees this post. To use it, move this folder aside and run: ln -s %s %s\n' \
+        "$room" "$shared" "$(printf '%q' "$shared")" "$(printf '%q' "$room_dir")" >&2
+    fi
+  fi
 
   local sender; sender=$(resolve_name "$as")
   stamp=$(date -u +%Y%m%d-%H%M%S)

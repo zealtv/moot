@@ -454,6 +454,11 @@ sits in (`.moot/rooms/`). A relative target written from the wrong folder can
 lead back to the link itself; `join` then says the link does not lead to a
 folder, and the fix is to remove it and link again.
 
+`join` will not shadow a shared room: when `<room>` already exists in the
+`.moots/` store beside the checkouts, it refuses and prints the `ln -s` to run
+instead, and `post` warns on stderr, and still posts, when it writes to a
+private room that has a shared namesake there.
+
 Each linked participant posts under its own name and
 keeps its own cursor in its own `seen/`, and `catchup` makes the cursor
 directory on its first run. The link is this machine's, not the repo's: it

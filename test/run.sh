@@ -113,6 +113,36 @@ check 'and says why' "$(j join 'bad room' 2>&1 >/dev/null | tail -1)" \
   "moot: room name 'bad room' is not filename-safe (use A-Z a-z 0-9 . _ -)"
 [ -e "$host/.moot/rooms/bad room" ] && no 'an unsafe room name writes no path' || ok 'an unsafe room name writes no path'
 
+# A shared room in the store beside the checkouts (<checkouts>/.moots/<room>)
+# is never shadowed by a private one. Each test builds its own store.
+group 'a shared room of the same name'
+checkouts=$(mktemp -d "$work/checkouts.XXXXXX")
+mkdir -p "$checkouts/.moots/runs/posts" "$checkouts/app"
+"$repo/install.sh" "$checkouts/app" >/dev/null
+a() { "$checkouts/app/.moot/moot.sh" "$@"; }
+store=$(cd "$checkouts" && pwd)/.moots/runs
+out=$(a join runs 2>&1); rc=$?
+check 'join refuses when a shared room of that name exists' "$rc" '1'
+check 'and writes no private room' "$(ls -A "$checkouts/app/.moot/rooms" | wc -l | tr -d ' ')" '0'
+check 'and prints the ln -s to run' "${out##*Link it instead: }" \
+  "ln -s $store $(cd "$checkouts/app" && pwd)/.moot/rooms/runs"
+eval "${out##*Link it instead: }"
+a post --as alice -m 'hello' 2>"$work/err" >/dev/null
+check 'once linked, join works on the shared room' "$(a join runs)" 'joined rooms/runs'
+check 'and a post lands in the shared room' "$(ls "$store/posts"/*.md | wc -l | tr -d ' ')" '1'
+check 'and a linked room does not warn' "$(cat "$work/err")" ''
+a join dev >/dev/null
+check 'join still makes a room with no shared namesake' "$(ls -A "$checkouts/app/.moot/rooms/dev")" 'posts'
+
+# A private room that predates the shared one still posts, with a warning.
+mkdir -p "$checkouts/.moots/dev/posts"
+a post --room dev --as alice -m 'shadowed' 2>"$work/err" >/dev/null; rc=$?
+check 'post to a shadowing private room still succeeds' "$rc" '0'
+check 'and the post is in the private room' "$(ls "$checkouts/app/.moot/rooms/dev/posts"/*.md | wc -l | tr -d ' ')" '1'
+check 'and warns on stderr that a shared room exists' "$(grep -c "shared room of that name exists at $checkouts/.moots/dev" "$work/err")" '1'
+check 'post to a room with no shared namesake says nothing' \
+  "$(a join mine >/dev/null; a post --room mine --as alice -m x 2>&1 >/dev/null)" ''
+
 # ---------------------------------------------------------------- subscribe
 
 # A room that already lives somewhere else. Every test here clones from a local
