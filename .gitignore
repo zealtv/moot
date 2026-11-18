@@ -1,12 +1,4 @@
-# Local agent tooling for this checkout; not part of moot.
-.loom/
-.glean/
-.lore/
-.nest/
-.groundhog/
-inbox
-AGENTS.md
-CLAUDE.md
-.claude/
-# moot: this machine's links and read state
-.moot/
+# moot: this machine's room links and read state
+.moot/seen/
+.moot/name
+.moot/room
