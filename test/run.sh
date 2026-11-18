@@ -830,6 +830,44 @@ err=$("$work/lonely-src/install.sh" "$host" 2>&1 >/dev/null); rc=$?
 check 'and says what it could not find' "$(printf '%s' "$err" | grep -c 'cannot find .moot/moot.sh')" '1'
 [ -e "$host/.moot" ] && no 'and leaves no empty .moot/ behind' || ok 'and leaves no empty .moot/ behind'
 
+# install.sh upgrades. Over a copied, customised .moot/, what the host owns
+# survives byte for byte, what moot ships refreshes, and a second run changes
+# nothing. A host adds its linked rooms to .moot/.gitignore, so that file is the
+# host's once it exists.
+host=$(mktemp -d "$work/upgrade.XXXXXX")
+cp -R "$repo/.moot" "$host/.moot"
+printf '# older script\n' > "$host/.moot/moot.sh"; chmod +x "$host/.moot/moot.sh"
+printf 'older readme\n' > "$host/.moot/README.md"
+printf 'older skill\n' > "$host/.moot/SKILL.md"
+printf 'seen/\nname\nroom\nrooms/dev\n' > "$host/.moot/.gitignore"
+mkdir -p "$host/.moot/rooms/board/posts" "$host/.moot/seen/board"
+printf 'a post\n' > "$host/.moot/rooms/board/posts/20260101T000000Z-alice-1.md"
+printf 'cursor\n' > "$host/.moot/seen/board/alice"
+printf 'alice\n' > "$host/.moot/name"
+printf 'board\n' > "$host/.moot/room"
+owned() { (cd "$host/.moot" && find . -type f ! -path ./moot.sh ! -path ./README.md ! -path ./SKILL.md -exec cksum {} + | sort); }
+before=$(owned)
+"$repo/install.sh" "$host" >/dev/null
+check 'upgrade leaves rooms, seen, name, room and .gitignore byte for byte' "$(owned)" "$before"
+check 'upgrade keeps the linked room the host added to .gitignore' "$(grep -c '^rooms/dev$' "$host/.moot/.gitignore")" '1'
+for f in moot.sh README.md SKILL.md; do
+  cmp -s "$repo/.moot/$f" "$host/.moot/$f" && ok "upgrade refreshes $f" || no "upgrade refreshes $f"
+done
+[ -x "$host/.moot/moot.sh" ] && ok 'upgrade leaves moot.sh executable' || no 'upgrade leaves moot.sh executable'
+after=$(cd "$host/.moot" && find . -type f -exec cksum {} + | sort)
+"$repo/install.sh" "$host" >/dev/null
+check 'a second upgrade changes no file' "$(cd "$host/.moot" && find . -type f -exec cksum {} + | sort)" "$after"
+# A missing .gitignore is seeded.
+rm -f -- "$host/.moot/.gitignore"
+"$repo/install.sh" "$host" >/dev/null
+cmp -s "$repo/.moot/.gitignore" "$host/.moot/.gitignore" && ok 'upgrade seeds a missing .gitignore' || no 'upgrade seeds a missing .gitignore'
+# Source and destination the same file: ./install.sh . inside a checkout.
+selfcopy=$(mktemp -d "$work/selfcopy.XXXXXX")
+cp -R "$repo/.moot" "$repo/install.sh" "$selfcopy/"
+rm -rf -- "${selfcopy:?}/.moot/seen" "${selfcopy:?}/.moot/rooms" "${selfcopy:?}/.moot/name" "${selfcopy:?}/.moot/room"
+( cd "$selfcopy" && ./install.sh . >/dev/null 2>&1 ) && ok 'install.sh . inside a checkout succeeds' || no 'install.sh . inside a checkout succeeds'
+cmp -s "$repo/.moot/moot.sh" "$selfcopy/.moot/moot.sh" && ok '...and leaves moot.sh as it was' || no '...and leaves moot.sh as it was'
+
 # .moot/ is a dotdir among dotdirs: installing beside the rest of the family
 # touches none of it.
 host=$(mktemp -d "$work/family.XXXXXX")

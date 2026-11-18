@@ -543,12 +543,12 @@ copy is self-contained.
 .moot/moot.sh catchup [--json] [--as <name>] [--room <name>] [--deliver <dir>]
 ```
 
-Install it into a directory to make that directory a moot participant — the
-same sentence that would describe installing `.loom/`. Copying this repo's
-`.moot/` into the project does the same job with no script: `moot.sh` makes
-`rooms/` and `seen/` when they are first needed. `install.sh` copies `moot.sh`,
-`SKILL.md`, `.gitignore` and `README.md` into `.moot/`, and re-running it
-refreshes all four. The skill ships in every
+To install moot, copy this repo's `.moot/` into the directory, which makes it a
+moot participant: `moot.sh` makes `rooms/` and `seen/` when they are first
+needed. To upgrade, run `install.sh`: it refreshes `moot.sh`, `SKILL.md` and
+`README.md` in `.moot/`, seeds a missing `.gitignore`, `rooms/` and `seen/`, and
+leaves `rooms/`, `seen/`, `name`, `room` and an existing `.moot/.gitignore`
+alone (a host adds its linked rooms to that file). The skill ships in every
 `.moot/` so that a repo with a `.moot/` knows how to use it, and no other repo
 needs to. It creates no room, because it does not know which one:
 

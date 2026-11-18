@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 #
-# Install moot into a directory, making it a moot participant.
+# Upgrade moot in a directory (or make it a moot participant if it is not one).
 #
 #   ./install.sh /path/to/dir
 #
-# Copies what this repo's .moot/ ships (moot.sh, README.md, SKILL.md and
-# .gitignore) into <dir>/.moot/, then runs init. Everything moot needs lives
-# under .moot/ — the rooms it holds and this participant's read state — so
-# .moot/ sits beside .loom/ and .gremlin/ and claims nothing of the directory
-# it is in. Re-running refreshes all four files.
-#
-# Copying the repo's .moot/ by hand does the same job without this script.
+# To install, copy this repo's .moot/ into the directory; this script is the
+# upgrade path. It refreshes what .moot/ ships (moot.sh, README.md and
+# SKILL.md) in <dir>/.moot/, seeds what is absent (.gitignore, rooms/ and
+# seen/, via init), and never touches what the host owns: rooms/, seen/, name,
+# room and an existing .moot/.gitignore, which a host edits to list its linked
+# rooms. Re-running changes nothing. Everything moot needs lives under .moot/,
+# so .moot/ sits beside .loom/ and .gremlin/ and claims nothing of the
+# directory it is in.
 #
 # The skill ships in every .moot/ so that a repo with a .moot/ knows how to use
 # it, and no other repo needs to.
@@ -20,9 +21,9 @@
 #
 #   <dir>/.moot/moot.sh join board
 #
-# The .gitignore it installs is .moot/.gitignore, which ignores this
-# participant's seen/, name and room and never touches the host's own. It
-# prints the line a git repo wants for each linked room, as a hint.
+# The .gitignore it seeds is .moot/.gitignore, which ignores this participant's
+# seen/, name and room and never touches the host's own. It prints the line a
+# git repo wants for each linked room, as a hint.
 
 set -euo pipefail
 
@@ -48,11 +49,15 @@ for f in .moot/moot.sh .moot/SKILL.md .moot/.gitignore .moot/README.md; do
 done
 
 mkdir -p -- "$host/.moot"
-cp -- "$source_dir/.moot/moot.sh" "$host/.moot/moot.sh"
-cp -- "$source_dir/.moot/README.md" "$host/.moot/README.md"
-cp -- "$source_dir/.moot/SKILL.md" "$host/.moot/SKILL.md"
-cp -- "$source_dir/.moot/.gitignore" "$host/.moot/.gitignore"
+# Source and destination can be the same file (./install.sh .): skip the copy.
+for f in moot.sh README.md SKILL.md; do
+  [ "$source_dir/.moot/$f" -ef "$host/.moot/$f" ] ||
+    cp -- "$source_dir/.moot/$f" "$host/.moot/$f"
+done
 chmod +x "$host/.moot/moot.sh"
+# .gitignore is the host's once it exists: it adds its linked rooms to it.
+[ -e "$host/.moot/.gitignore" ] ||
+  cp -- "$source_dir/.moot/.gitignore" "$host/.moot/.gitignore"
 
 "$host/.moot/moot.sh" init >/dev/null
 printf 'installed moot into %s/.moot\n' "$host"
