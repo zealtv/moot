@@ -311,8 +311,8 @@ room=$(new_room)
 "$room/.moot/moot.sh" post --as bob -m 'done' >/dev/null
 check 'post leaves no landing file' "$(ls -A "$room/.moot/rooms/board/posts" | grep -c landing)" '0'
 # A post mid-compose must be invisible to every reader, tool or human.
-: > "$room/.moot/rooms/board/posts/.20260829-120000-tengu.999.landing"
-check 'a landing file is not a post' "$("$room/.moot/moot.sh" read | grep -c 'tengu')" '0'
+: > "$room/.moot/rooms/board/posts/.20260829-120000-alice.999.landing"
+check 'a landing file is not a post' "$("$room/.moot/moot.sh" read | grep -c 'alice')" '0'
 check 'a landing file is not in posts/*' "$(printf '%s\n' "$room"/.moot/rooms/board/posts/* | grep -c landing)" '0'
 
 group 'same-second collision'
@@ -339,27 +339,27 @@ room=$(new_room)
 posts="$room/.moot/rooms/board/posts"
 # Three posts, the clock catching up a second at a time.
 step_date 20260829-163412 20260829-163412 20260829-163413 20260829-163413 20260829-163414
-"$room/.moot/moot.sh" post --as tengu -m 'one' >/dev/null
-"$room/.moot/moot.sh" post --as tengu -m 'two' >/dev/null
-"$room/.moot/moot.sh" post --as tengu -m 'three' >/dev/null
+"$room/.moot/moot.sh" post --as alice -m 'one' >/dev/null
+"$room/.moot/moot.sh" post --as alice -m 'two' >/dev/null
+"$room/.moot/moot.sh" post --as alice -m 'three' >/dev/null
 thaw_step
 check 'a same-second clash re-stamps instead of suffixing' "$(ls "$posts" | tr '\n' ' ')" \
-  '20260829-163412-tengu.md 20260829-163413-tengu.md 20260829-163414-tengu.md '
-check 'no post was overwritten' "$(cat "$posts/20260829-163412-tengu.md")" 'one'
-check 'the re-stamped post kept its own body' "$(cat "$posts/20260829-163414-tengu.md")" 'three'
+  '20260829-163412-alice.md 20260829-163413-alice.md 20260829-163414-alice.md '
+check 'no post was overwritten' "$(cat "$posts/20260829-163412-alice.md")" 'one'
+check 'the re-stamped post kept its own body' "$(cat "$posts/20260829-163414-alice.md")" 'three'
 check 'read shows them in the order written' \
   "$("$room/.moot/moot.sh" read | grep -E '^(one|two|three)$' | tr '\n' ' ')" 'one two three '
-check 'read names the sender plainly' "$("$room/.moot/moot.sh" read | grep -c '· tengu ──')" '3'
+check 'read names the sender plainly' "$("$room/.moot/moot.sh" read | grep -c '· alice ──')" '3'
 
 # A hyphenated sender, the case a -N suffix could not be told apart from.
 room=$(new_room)
 posts="$room/.moot/rooms/board/posts"
 step_date 20260829-163412 20260829-163412 20260829-163413
-"$room/.moot/moot.sh" post --as tengu-the-gremlin -m 'a' >/dev/null
-"$room/.moot/moot.sh" post --as tengu-the-gremlin -m 'b' >/dev/null
+"$room/.moot/moot.sh" post --as alice-bot -m 'a' >/dev/null
+"$room/.moot/moot.sh" post --as alice-bot -m 'b' >/dev/null
 thaw_step
 check 'a hyphenated sender re-stamps too' "$(ls "$posts" | tr '\n' ' ')" \
-  '20260829-163412-tengu-the-gremlin.md 20260829-163413-tengu-the-gremlin.md '
+  '20260829-163412-alice-bot.md 20260829-163413-alice-bot.md '
 
 # A directory post holds the id as surely as a file does.
 room=$(new_room)
@@ -375,8 +375,8 @@ thaw_step
 room=$(new_room)
 posts="$room/.moot/rooms/board/posts"
 step_date 20260829-163412
-"$room/.moot/moot.sh" post --as tengu -m 'first' >/dev/null
-err=$("$room/.moot/moot.sh" post --as tengu -m 'stuck' 2>&1 >/dev/null); rc=$?
+"$room/.moot/moot.sh" post --as alice -m 'first' >/dev/null
+err=$("$room/.moot/moot.sh" post --as alice -m 'stuck' 2>&1 >/dev/null); rc=$?
 thaw_step
 [ "$rc" -ne 0 ] && ok 'a stopped clock fails the post' || no 'a stopped clock fails the post'
 check 'and says why' "$(printf '%s' "$err" | grep -c 'clock is not moving')" '1'
@@ -388,18 +388,18 @@ check 'and claims nothing' "$(ls "$posts" | wc -l | tr -d ' ')" '1'
 # must wait its way past all of them rather than give up after five.
 room=$(new_room)
 posts="$room/.moot/rooms/board/posts"
-for t in 12 13 14 15 16 17 18; do printf 'earlier %s\n' "$t" > "$posts/20260829-1634$t-tengu.md"; done
+for t in 12 13 14 15 16 17 18; do printf 'earlier %s\n' "$t" > "$posts/20260829-1634$t-alice.md"; done
 step_date 20260829-163412 20260829-163413 20260829-163414 20260829-163415 20260829-163416 20260829-163417 20260829-163418 20260829-163419
-"$room/.moot/moot.sh" post --as tengu -m 'late but landed' >/dev/null; rc=$?
+"$room/.moot/moot.sh" post --as alice -m 'late but landed' >/dev/null; rc=$?
 thaw_step
 check 'a post that waits more than five seconds still lands' "$rc" '0'
-check 'and lands on the first free second' "$(cat "$posts/20260829-163419-tengu.md" 2>/dev/null)" 'late but landed'
+check 'and lands on the first free second' "$(cat "$posts/20260829-163419-alice.md" 2>/dev/null)" 'late but landed'
 
 # A burst, on the real clock: four posts under one name at once. Each takes the
 # next free second, and every body lands.
 room=$(new_room)
 posts="$room/.moot/rooms/board/posts"
-for i in 1 2 3 4; do "$room/.moot/moot.sh" post --as tengu -m "burst $i" >/dev/null 2>"$work/burst.$i.err" & done
+for i in 1 2 3 4; do "$room/.moot/moot.sh" post --as alice -m "burst $i" >/dev/null 2>"$work/burst.$i.err" & done
 wait
 check 'four concurrent posts under one name all land' "$(ls "$posts"/*.md | wc -l | tr -d ' ')" '4'
 check 'and each body is there' "$(cat "$posts"/*.md | sort | tr '\n' ' ')" 'burst 1 burst 2 burst 3 burst 4 '
@@ -409,8 +409,8 @@ check 'and no landing file is left' "$(ls -A "$posts" | grep -c landing)" '0'
 # -N posts from before the change still read and catch up in order, once.
 room=$(new_room)
 posts="$room/.moot/rooms/board/posts"
-printf '@bob first\n'  > "$posts/20260829-163412-tengu.md"
-printf '@bob second\n' > "$posts/20260829-163412-tengu-2.md"
+printf '@bob first\n'  > "$posts/20260829-163412-alice.md"
+printf '@bob second\n' > "$posts/20260829-163412-alice-2.md"
 check 'an old -N post reads after the one without it' \
   "$("$room/.moot/moot.sh" read | grep -E '^@bob' | tr '\n' ' ')" '@bob first @bob second '
 first=$("$room/.moot/moot.sh" catchup --json --as bob)
@@ -462,7 +462,7 @@ printf 'already here\n' > "$room/.moot/rooms/board/posts/20260829-090000-bob.md"
 MOOT_FOLLOW_INTERVAL=0.2 "$room/.moot/moot.sh" read --follow > "$work/follow.out" 2>&1 &
 follow_pid=$!
 sleep 1
-printf 'arrived later\n' > "$room/.moot/rooms/board/posts/20260829-100000-tengu.md"
+printf 'arrived later\n' > "$room/.moot/rooms/board/posts/20260829-100000-alice.md"
 sleep 1
 kill "$follow_pid" 2>/dev/null
 wait "$follow_pid" 2>/dev/null
@@ -476,11 +476,11 @@ check '--follow writes nothing back into the moot' "$(ls -A "$room/.moot/rooms/b
 group 'attachments'
 room=$(new_room)
 mkdir -p "$room/.moot/rooms/board/posts/20260829-164070-bob"
-printf 'see the patch @tengu\n' > "$room/.moot/rooms/board/posts/20260829-164070-bob/post.md"
+printf 'see the patch @alice\n' > "$room/.moot/rooms/board/posts/20260829-164070-bob/post.md"
 printf 'diff goes here\n' > "$room/.moot/rooms/board/posts/20260829-164070-bob/diff.patch"
-printf 'a plain one\n' > "$room/.moot/rooms/board/posts/20260829-170000-tengu.md"
+printf 'a plain one\n' > "$room/.moot/rooms/board/posts/20260829-170000-alice.md"
 out=$("$room/.moot/moot.sh" read)
-case $out in *'see the patch @tengu'*) ok 'an attachment post renders post.md' ;; *) no 'an attachment post renders post.md' ;; esac
+case $out in *'see the patch @alice'*) ok 'an attachment post renders post.md' ;; *) no 'an attachment post renders post.md' ;; esac
 case $out in *'attached: diff.patch'*) ok 'an attachment post lists its files' ;; *) no 'an attachment post lists its files' "$out" ;; esac
 case $out in *'attached: post.md'*) no 'post.md is not listed as an attachment' ;; *) ok 'post.md is not listed as an attachment' ;; esac
 case $out in *'2026-08-29 16:40:70 UTC · bob'*) ok 'an attachment directory gets a normal heading' ;; *) no 'an attachment directory gets a normal heading' ;; esac
@@ -504,23 +504,23 @@ check '$MOOT_NAME comes next' "$(sender_of "$room")" 'envname'
 room=$(new_room)
 printf 'localname\n' > "$room/.moot/name"
 mkdir -p "$room/.gremlin"
-printf 'name=tengu\n' > "$room/.gremlin/name"
+printf 'name=alice\n' > "$room/.gremlin/name"
 ( cd "$room" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
 check '.moot/name comes next' "$(sender_of "$room")" 'localname'
 
-# .gremlin/name is a key=value file. Taking the whole line yields "name=tengu",
+# .gremlin/name is a key=value file. Taking the whole line yields "name=alice",
 # which is not a filename-safe sender.
 room=$(new_room)
 mkdir -p "$room/.gremlin"
-printf 'name=tengu\nsource=generated\nvocabulary=1\n' > "$room/.gremlin/name"
+printf 'name=alice\nsource=generated\nvocabulary=1\n' > "$room/.gremlin/name"
 ( cd "$room" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
-check '.gremlin/name comes next' "$(sender_of "$room")" 'tengu'
+check '.gremlin/name comes next' "$(sender_of "$room")" 'alice'
 
 room=$(new_room)
 mkdir -p "$room/.gremlin"
-printf 'tengu\n' > "$room/.gremlin/name"
+printf 'alice\n' > "$room/.gremlin/name"
 ( cd "$room" && MOOT_NAME= USER=username "$room/.moot/moot.sh" post -m 'x' >/dev/null )
-check 'a bare .gremlin/name still resolves' "$(sender_of "$room")" 'tengu'
+check 'a bare .gremlin/name still resolves' "$(sender_of "$room")" 'alice'
 
 room=$(new_room)
 printf 'bad=name\n' > "$room/.moot/name"
@@ -566,12 +566,12 @@ printf '@fanta over to you\n' > "$room/.moot/rooms/board/posts/20260829-100000-b
 check 'the relative wiring line delivers' "$(ls "$room/.nest/in" | wc -l | tr -d ' ')" '1'
 
 # The last resort is the folder .moot/ sits in, so a repo needs no name file.
-named="$work/bopOS"; mkdir -p "$named"
+named="$work/myApp"; mkdir -p "$named"
 "$repo/install.sh" "$named" >/dev/null; "$named/.moot/moot.sh" join board >/dev/null
 ( cd "$work" && MOOT_NAME= USER=username "$named/.moot/moot.sh" post -m 'x' >/dev/null )
-check 'the host folder name is the last resort, not $USER' "$(sender_of "$named")" 'bopOS'
+check 'the host folder name is the last resort, not $USER' "$(sender_of "$named")" 'myApp'
 ( cd / && env -u MOOT_NAME -u USER "$named/.moot/moot.sh" post -m 'y' >/dev/null )
-check 'and needs no $USER at all' "$(ls "$named/.moot/rooms/board/posts" | grep -c 'bopOS')" '2'
+check 'and needs no $USER at all' "$(ls "$named/.moot/rooms/board/posts" | grep -c 'myApp')" '2'
 
 spaced="$work/Pedal Board"; mkdir -p "$spaced"
 "$repo/install.sh" "$spaced" >/dev/null; "$spaced/.moot/moot.sh" join board >/dev/null
@@ -589,8 +589,8 @@ room=$(new_room)
 # The hand-posting incantation from the README must produce a readable post.
 ( cd "$room" && echo 'posted by hand' > ".moot/rooms/board/posts/$(date -u +%Y%m%d-%H%M%S)-bob.md" )
 check 'a hand-written post is a post' "$("$room/.moot/moot.sh" read | grep -c 'posted by hand')" '1'
-"$room/.moot/moot.sh" post --as tengu -m 'posted by tool' >/dev/null
-check 'a tool-written post is readable by hand' "$(cat "$room"/.moot/rooms/board/posts/*-tengu.md)" 'posted by tool'
+"$room/.moot/moot.sh" post --as alice -m 'posted by tool' >/dev/null
+check 'a tool-written post is readable by hand' "$(cat "$room"/.moot/rooms/board/posts/*-alice.md)" 'posted by tool'
 
 # ---------------------------------------------------------------- catchup
 
@@ -600,55 +600,55 @@ m() { "$room/.moot/moot.sh" "$@"; }
 say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
 
 say 20260829-100000-bob   'board is up'
-say 20260829-100100-bob   'hey @tengu can you look at the thing'
+say 20260829-100100-bob   'hey @alice can you look at the thing'
 say 20260829-100200-bob   'unrelated announcement'
 say 20260829-100300-bob   '@all standup moved'
 say 20260829-100400-bob   'nice work @fanta'
 
-out=$(m catchup --as tengu)
+out=$(m catchup --as alice)
 check 'catchup delivers a direct mention' "$(printf '%s' "$out" | grep -c 'can you look at')" '1'
 check 'catchup delivers @all'             "$(printf '%s' "$out" | grep -c 'standup moved')" '1'
 check 'catchup skips an unmentioned post' "$(printf '%s' "$out" | grep -c 'unrelated')" '0'
 check 'catchup skips someone else atted'  "$(printf '%s' "$out" | grep -c 'nice work')" '0'
-check 'catchup writes the cursor' "$(cat "$room/.moot/seen/board/tengu")" '20260829-100400-bob'
+check 'catchup writes the cursor' "$(cat "$room/.moot/seen/board/alice")" '20260829-100400-bob'
 
-out=$(m catchup --as tengu)
+out=$(m catchup --as alice)
 check 'a re-run delivers nothing'  "$(printf '%s' "$out" | grep -c 'can you look at')" '0'
-check 'the cursor did not move back' "$(cat "$room/.moot/seen/board/tengu")" '20260829-100400-bob'
+check 'the cursor did not move back' "$(cat "$room/.moot/seen/board/alice")" '20260829-100400-bob'
 
-say 20260829-100500-bob '@tengu one more'
-out=$(m catchup --as tengu)
+say 20260829-100500-bob '@alice one more'
+out=$(m catchup --as alice)
 check 'catchup resumes from the cursor' "$(printf '%s' "$out" | grep -c 'one more')" '1'
 check 'catchup does not re-deliver older mentions' "$(printf '%s' "$out" | grep -c 'can you look at')" '0'
 
 check 'the whole board is still readable' "$(m read | grep -c 'unrelated announcement')" '1'
-check 'catchup advanced past unmentioned posts' "$(cat "$room/.moot/seen/board/tengu")" '20260829-100500-bob'
+check 'catchup advanced past unmentioned posts' "$(cat "$room/.moot/seen/board/alice")" '20260829-100500-bob'
 
 group 'catchup and nobody'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
 say 20260829-100000-bob 'hello @nobodyatall'
-out=$(m catchup --as tengu)
+out=$(m catchup --as alice)
 check 'a mention of nobody reaches nobody' "$(printf '%s' "$out" | grep -c 'hello')" '0'
-check 'a mention of nobody still advances the cursor' "$(cat "$room/.moot/seen/board/tengu")" '20260829-100000-bob'
+check 'a mention of nobody still advances the cursor' "$(cat "$room/.moot/seen/board/alice")" '20260829-100000-bob'
 check 'the mistyped mention is visible on the board' "$(m read | grep -c '@nobodyatall')" '1'
 
 group 'mention matching'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
-say 20260829-100000-bob 'thanks @tengu.'
-say 20260829-100100-bob 'ask @tengu, please'
-say 20260829-100200-bob 'not @tengulike'
-say 20260829-100300-bob 'an email a@tengu is not a mention of a'
-out=$(m catchup --as tengu)
+say 20260829-100000-bob 'thanks @alice.'
+say 20260829-100100-bob 'ask @alice, please'
+say 20260829-100200-bob 'not @alicelike'
+say 20260829-100300-bob 'an email a@alice is not a mention of a'
+out=$(m catchup --as alice)
 check 'a trailing full stop still mentions'   "$(printf '%s' "$out" | grep -c 'thanks')" '1'
 check 'a trailing comma still mentions'       "$(printf '%s' "$out" | grep -c 'please')" '1'
-check 'a longer name is a different name'     "$(printf '%s' "$out" | grep -c 'not @tengulike')" '0'
+check 'a longer name is a different name'     "$(printf '%s' "$out" | grep -c 'not @alicelike')" '0'
 
 group 'catchup --deliver'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
 inbox="$work/inbox"; rm -rf "$inbox"
 say 20260829-100000-bob 'quiet announcement'
-say 20260829-100100-bob '@tengu please handle the thing bob raised earlier'
-m catchup --as tengu --deliver "$inbox" >/dev/null
+say 20260829-100100-bob '@alice please handle the thing bob raised earlier'
+m catchup --as alice --deliver "$inbox" >/dev/null
 check '--deliver writes one file per mention' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 delivered=$(ls "$inbox")
 case $delivered in *20260829-100100-bob*) ok 'a delivered filename carries the post id' ;; *) no 'a delivered filename carries the post id' "$delivered" ;; esac
@@ -662,24 +662,24 @@ case $body in *'read --room board --tail'*) ok 'a delivered item says how to rea
 case $body in *'- room: `board`'*) ok 'a delivered item names its room' ;; *) no 'a delivered item names its room' "$body" ;; esac
 check '--deliver delivers only mentions' "$(grep -rc 'quiet announcement' "$inbox" | grep -c ':1$')" '0'
 
-m catchup --as tengu --deliver "$inbox" >/dev/null
+m catchup --as alice --deliver "$inbox" >/dev/null
 check 'a re-run delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 
 # Moot does not know what a nest is: gremlin integration is a path.
 rm -rf "$work/nest"; mkdir -p "$work/nest/in"
-rm -f "$room/.moot/seen/board/tengu"
-m catchup --as tengu --deliver "$work/nest/in" >/dev/null
+rm -f "$room/.moot/seen/board/alice"
+m catchup --as alice --deliver "$work/nest/in" >/dev/null
 check '--deliver takes any directory the caller names' "$(ls "$work/nest/in" | wc -l | tr -d ' ')" '1'
 
 group 'catchup on a read-only moot'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
-say 20260829-100000-bob '@tengu the board is read-only from here'
+say 20260829-100000-bob '@alice the board is read-only from here'
 inbox="$work/ro-inbox"; rm -rf "$inbox"; mkdir -p "$inbox"
 chmod -w "$room/.moot/seen/board"
-m catchup --as tengu --deliver "$inbox" >/dev/null 2>"$work/ro.err"
+m catchup --as alice --deliver "$inbox" >/dev/null 2>"$work/ro.err"
 check 'a read-only moot still delivers' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 check 'a read-only moot warns about the cursor' "$(grep -c 'read-only room' "$work/ro.err")" '1'
-m catchup --as tengu --deliver "$inbox" >/dev/null 2>&1
+m catchup --as alice --deliver "$inbox" >/dev/null 2>&1
 check 'a read-only moot still delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 chmod +w "$room/.moot/seen/board"
 
@@ -691,84 +691,84 @@ say 20260829-100000-bob '@fanta over to you'
 [ -f "$room/.moot/seen/board/fanta" ] && ok 'catchup uses the same name chain as post' || no 'catchup uses the same name chain as post'
 
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
-say 20260829-100000-bob '@tengu hi'
-out=$(m catchup --json --as tengu)
+say 20260829-100000-bob '@alice hi'
+out=$(m catchup --json --as alice)
 case $out in *'"delivered":[{"room":"board","id":"20260829-100000-bob"}]'*) ok 'catchup --json names the room of what it delivered' ;; *) no 'catchup --json names the room of what it delivered' "$out" ;; esac
 case $out in *'"since":null'*) ok 'catchup --json reports no prior cursor as null' ;; *) no 'catchup --json reports no prior cursor as null' "$out" ;; esac
 case $out in *'"rooms":[{"room":"board"'*) ok 'catchup --json reports one entry per room swept' ;; *) no 'catchup --json reports one entry per room swept' "$out" ;; esac
-out=$(m catchup --json --as tengu)
+out=$(m catchup --json --as alice)
 case $out in *'"changed":false'*'"delivered":[]'*) ok 'catchup --json reports an unchanged re-run' ;; *) no 'catchup --json reports an unchanged re-run' "$out" ;; esac
 
 group 'catchup sweeps every room'
 host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
 for r in board release ops; do
   j join "$r" >/dev/null
-  printf '@tengu the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-bob.md"
+  printf '@alice the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-bob.md"
 done
 inbox="$work/sweep-inbox"; rm -rf "$inbox"
-out=$(j catchup --as tengu --deliver "$inbox")
+out=$(j catchup --as alice --deliver "$inbox")
 check 'one call delivers from every room' "$(ls "$inbox" | wc -l | tr -d ' ')" '3'
 check 'and says so on one line' "$(printf '%s' "$out" | wc -l | tr -d ' ')" '0'
-check 'the sweep advances every cursor' "$(ls "$host/.moot/seen"/*/tengu | wc -l | tr -d ' ')" '3'
-j catchup --as tengu --deliver "$inbox" >/dev/null
+check 'the sweep advances every cursor' "$(ls "$host/.moot/seen"/*/alice | wc -l | tr -d ' ')" '3'
+j catchup --as alice --deliver "$inbox" >/dev/null
 check 'a re-run of the sweep delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '3'
 
 # Two rooms can produce the same post id in the same second from the same
 # sender. The filename is the whole duplicate-suppression mechanism.
 host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
 j join board >/dev/null; j join release >/dev/null
-printf '@tengu same second, board\n' > "$host/.moot/rooms/board/posts/20260829-100000-bob.md"
-printf '@tengu same second, release\n' > "$host/.moot/rooms/release/posts/20260829-100000-bob.md"
+printf '@alice same second, board\n' > "$host/.moot/rooms/board/posts/20260829-100000-bob.md"
+printf '@alice same second, release\n' > "$host/.moot/rooms/release/posts/20260829-100000-bob.md"
 inbox="$work/clash-inbox"; rm -rf "$inbox"
-j catchup --as tengu --deliver "$inbox" >/dev/null
+j catchup --as alice --deliver "$inbox" >/dev/null
 check 'a same-second clash across rooms delivers both' "$(ls "$inbox" | wc -l | tr -d ' ')" '2'
 check 'and neither body was lost' "$(cat "$inbox"/* | grep -c 'same second,')" '2'
 
 group 'catchup --room narrows the sweep'
 host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
 j join board >/dev/null; j join release >/dev/null
-printf '@tengu board\n' > "$host/.moot/rooms/board/posts/20260829-100000-bob.md"
-printf '@tengu release\n' > "$host/.moot/rooms/release/posts/20260829-100000-bob.md"
+printf '@alice board\n' > "$host/.moot/rooms/board/posts/20260829-100000-bob.md"
+printf '@alice release\n' > "$host/.moot/rooms/release/posts/20260829-100000-bob.md"
 inbox="$work/narrow-inbox"; rm -rf "$inbox"
-j catchup --as tengu --room board --deliver "$inbox" >/dev/null
+j catchup --as alice --room board --deliver "$inbox" >/dev/null
 check '--room delivers from that room only' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
-[ -f "$host/.moot/seen/board/tengu" ] && ok '--room advances that cursor' || no '--room advances that cursor'
-[ -e "$host/.moot/seen/release/tengu" ] && no '--room leaves the other cursor alone' || ok '--room leaves the other cursor alone'
-j catchup --as tengu --room nosuch >/dev/null 2>&1 && no '--room on an unjoined room is an error' || ok '--room on an unjoined room is an error'
+[ -f "$host/.moot/seen/board/alice" ] && ok '--room advances that cursor' || no '--room advances that cursor'
+[ -e "$host/.moot/seen/release/alice" ] && no '--room leaves the other cursor alone' || ok '--room leaves the other cursor alone'
+j catchup --as alice --room nosuch >/dev/null 2>&1 && no '--room on an unjoined room is an error' || ok '--room on an unjoined room is an error'
 
 group 'a read-only room does not stop the sweep'
 host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
 for r in aa bb cc; do
   j join "$r" >/dev/null
-  printf '@tengu the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-bob.md"
+  printf '@alice the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-bob.md"
 done
 chmod -w "$host/.moot/seen/bb"
 inbox="$work/ro-sweep"; rm -rf "$inbox"
-j catchup --as tengu --deliver "$inbox" >/dev/null 2>"$work/ro-sweep.err"
+j catchup --as alice --deliver "$inbox" >/dev/null 2>"$work/ro-sweep.err"
 check 'the read-only room still delivered' "$(ls "$inbox" | wc -l | tr -d ' ')" '3'
 check 'and warned about its cursor' "$(grep -c 'read-only room' "$work/ro-sweep.err")" '1'
-[ -f "$host/.moot/seen/cc/tengu" ] && ok 'the room after it was still swept' || no 'the room after it was still swept'
+[ -f "$host/.moot/seen/cc/alice" ] && ok 'the room after it was still swept' || no 'the room after it was still swept'
 chmod +w "$host/.moot/seen/bb"
 
 group 'catchup with no rooms at all'
 host=$(new_host)
-"$host/.moot/moot.sh" catchup --as tengu >/dev/null 2>&1 && ok 'a host with no rooms exits clean' || no 'a host with no rooms exits clean'
-check 'and says nothing' "$("$host/.moot/moot.sh" catchup --as tengu 2>&1 | wc -c | tr -d ' ')" '0'
-out=$("$host/.moot/moot.sh" catchup --json --as tengu)
+"$host/.moot/moot.sh" catchup --as alice >/dev/null 2>&1 && ok 'a host with no rooms exits clean' || no 'a host with no rooms exits clean'
+check 'and says nothing' "$("$host/.moot/moot.sh" catchup --as alice 2>&1 | wc -c | tr -d ' ')" '0'
+out=$("$host/.moot/moot.sh" catchup --json --as alice)
 case $out in *'"rooms":[]'*'"delivered":[]'*) ok 'and --json reports an empty sweep' ;; *) no 'and --json reports an empty sweep' "$out" ;; esac
 
 group 'catchup on an empty board'
 room=$(new_room)
-"$room/.moot/moot.sh" catchup --as tengu >/dev/null 2>&1 && ok 'catchup on an empty board succeeds' || no 'catchup on an empty board succeeds'
-[ -e "$room/.moot/seen/board/tengu" ] && no 'an empty board writes no cursor' || ok 'an empty board writes no cursor'
+"$room/.moot/moot.sh" catchup --as alice >/dev/null 2>&1 && ok 'catchup on an empty board succeeds' || no 'catchup on an empty board succeeds'
+[ -e "$room/.moot/seen/board/alice" ] && no 'an empty board writes no cursor' || ok 'an empty board writes no cursor'
 
 group 'catchup and attachments'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }
 mkdir -p "$room/.moot/rooms/board/posts/20260829-100000-bob"
-printf '@tengu see the patch\n' > "$room/.moot/rooms/board/posts/20260829-100000-bob/post.md"
+printf '@alice see the patch\n' > "$room/.moot/rooms/board/posts/20260829-100000-bob/post.md"
 printf 'diff\n' > "$room/.moot/rooms/board/posts/20260829-100000-bob/diff.patch"
 inbox="$work/att-inbox"; rm -rf "$inbox"
-m catchup --as tengu --deliver "$inbox" >/dev/null
+m catchup --as alice --deliver "$inbox" >/dev/null
 check 'an attachment post is delivered' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 case $(cat "$inbox"/*) in *'diff.patch'*) ok 'a delivered attachment post points at its files' ;; *) no 'a delivered attachment post points at its files' ;; esac
 
@@ -826,13 +826,13 @@ check 'and the dotdirs are peers' "$(ls -A "$host" | tr '\n' ' ')" '.loom .moot 
 # folder that syncs is posts/, and nothing in it is written by two hands.
 group 'two participants'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }
-printf '@tengu morning\n' > "$room/.moot/rooms/board/posts/20260829-090000-bob.md"
+printf '@alice morning\n' > "$room/.moot/rooms/board/posts/20260829-090000-bob.md"
 twin="$work/twin"; rm -rf "$twin"; cp -r "$room" "$twin"
 m catchup --as bob >/dev/null
-"$twin/.moot/moot.sh" catchup --as tengu >/dev/null
-[ -e "$room/.moot/seen/board/tengu" ] && no 'a cursor never travels to the other copy' || ok 'a cursor never travels to the other copy'
+"$twin/.moot/moot.sh" catchup --as alice >/dev/null
+[ -e "$room/.moot/seen/board/alice" ] && no 'a cursor never travels to the other copy' || ok 'a cursor never travels to the other copy'
 [ -e "$twin/.moot/seen/board/bob" ] && no 'the other copy holds only its own cursor' || ok 'the other copy holds only its own cursor'
-"$twin/.moot/moot.sh" post --as tengu -m 'on it' >/dev/null
+"$twin/.moot/moot.sh" post --as alice -m 'on it' >/dev/null
 before=$(cat "$room/.moot/seen/board/bob")
 check 'the first catchup did write a cursor to compare against' "$before" '20260829-090000-bob'
 rsync -a "$twin/.moot/rooms/board/posts/" "$room/.moot/rooms/board/posts/"; rsync -a "$room/.moot/rooms/board/posts/" "$twin/.moot/rooms/board/posts/"
@@ -846,67 +846,67 @@ parent=$(mktemp -d "$work/repos.XXXXXX")
 "$repo/install.sh" "$parent" >/dev/null
 printf 'bob\n' > "$parent/.moot/name"
 "$parent/.moot/moot.sh" join dev >/dev/null
-for r in bopOS easyhog; do
+for r in myapp carol; do
   mkdir -p "$parent/$r"
   "$repo/install.sh" "$parent/$r" >/dev/null
   ln -s "$parent/.moot/rooms/dev" "$parent/$r/.moot/rooms/dev"
 done
-b() { ( cd "$work" && MOOT_NAME= "$parent/bopOS/.moot/moot.sh" "$@" ); }
-e() { ( cd "$work" && MOOT_NAME= "$parent/easyhog/.moot/moot.sh" "$@" ); }
+b() { ( cd "$work" && MOOT_NAME= "$parent/myapp/.moot/moot.sh" "$@" ); }
+e() { ( cd "$work" && MOOT_NAME= "$parent/carol/.moot/moot.sh" "$@" ); }
 h() { ( cd "$work" && MOOT_NAME= "$parent/.moot/moot.sh" "$@" ); }
 
 check 'a linked room is a room' "$(b rooms | grep -c dev)" '1'
 step_date 20260829-100000 20260829-100000 20260829-100000
-b post -m '@easyhog dispatching two workers' >/dev/null
-e post -m '@bopOS ok, holding mine' >/dev/null
+b post -m '@carol dispatching two workers' >/dev/null
+e post -m '@myapp ok, holding mine' >/dev/null
 h post -m '@all usage is fine' >/dev/null
 thaw_step
 check 'three repos posting in one second get three ids' \
   "$(ls "$parent/.moot/rooms/dev/posts" | tr '\n' ' ')" \
-  '20260829-100000-bob.md 20260829-100000-bopOS.md 20260829-100000-easyhog.md '
+  '20260829-100000-bob.md 20260829-100000-carol.md 20260829-100000-myapp.md '
 
 out_e=$(e catchup --json)
-check 'each repo catches up under its folder name' "$(printf '%s' "$out_e" | grep -o '"sender":"[^"]*"')" '"sender":"easyhog"'
+check 'each repo catches up under its folder name' "$(printf '%s' "$out_e" | grep -o '"sender":"[^"]*"')" '"sender":"carol"'
 check 'and gets what mentions it' "$(printf '%s' "$out_e" | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":2'
-[ -f "$parent/easyhog/.moot/seen/dev/easyhog" ] && ok 'the cursor lives in the reading repo' || no 'the cursor lives in the reading repo'
-[ ! -e "$parent/.moot/seen/dev/easyhog" ] && ok 'and never in the room holder' || no 'and never in the room holder'
+[ -f "$parent/carol/.moot/seen/dev/carol" ] && ok 'the cursor lives in the reading repo' || no 'the cursor lives in the reading repo'
+[ ! -e "$parent/.moot/seen/dev/carol" ] && ok 'and never in the room holder' || no 'and never in the room holder'
 [ ! -e "$parent/.moot/rooms/dev/seen" ] && [ "$(ls -A "$parent/.moot/rooms/dev")" = posts ] \
   && ok 'the shared room holds posts/ and nothing else' || no 'the shared room holds posts/ and nothing else'
-check "one repo's catchup leaves another's cursor alone" "$(ls -A "$parent/bopOS/.moot/seen/dev" 2>/dev/null | wc -l | tr -d ' ')" '0'
+check "one repo's catchup leaves another's cursor alone" "$(ls -A "$parent/myapp/.moot/seen/dev" 2>/dev/null | wc -l | tr -d ' ')" '0'
 out_b=$(b catchup --json)
 check 'the other repo still gets its own mentions' "$(printf '%s' "$out_b" | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":2'
 check 'and a second sweep delivers nothing twice' "$(b catchup --json | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":0'
 
 group 'a sweep leaves the current second for the next'
 # A post can land in the second a sweep reads, under a name that sorts below the
-# cursor's (bob after easyhog). If the cursor moved onto that second, the late
+# cursor's (bob after carol). If the cursor moved onto that second, the late
 # post would be skipped for good. The stubbed clock stands at the second
 # being swept; a sweep leaves that second alone.
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
-say 20260829-095959-easyhog 'settled earlier'
-say 20260829-100000-easyhog '@tengu same second, sorts last'
+say 20260829-095959-carol 'settled earlier'
+say 20260829-100000-carol '@alice same second, sorts last'
 freeze_date 20260829-100000
-out=$(m catchup --json --as tengu)
+out=$(m catchup --json --as alice)
 check 'catchup scans only what is settled' "$(printf '%s' "$out" | grep -o '"scanned":[0-9]*')" '"scanned":1'
-check 'and parks the cursor on the last settled post' "$(cat "$room/.moot/seen/board/tengu")" '20260829-095959-easyhog'
-check 'and reports that cursor' "$(printf '%s' "$out" | grep -o '"cursor":"[^"]*"')" '"cursor":"20260829-095959-easyhog"'
-say 20260829-100000-bob '@tengu same second, sorts first'
+check 'and parks the cursor on the last settled post' "$(cat "$room/.moot/seen/board/alice")" '20260829-095959-carol'
+check 'and reports that cursor' "$(printf '%s' "$out" | grep -o '"cursor":"[^"]*"')" '"cursor":"20260829-095959-carol"'
+say 20260829-100000-bob '@alice same second, sorts first'
 thaw_date; freeze_date 20260829-100001
-out=$(m catchup --json --as tengu)
+out=$(m catchup --json --as alice)
 check 'the next sweep delivers both same-second posts' "$(printf '%s' "$out" | grep -o '"delivered":\[[^]]*\]')" \
-  '"delivered":[{"room":"board","id":"20260829-100000-bob"},{"room":"board","id":"20260829-100000-easyhog"}]'
-check 'and moves the cursor onto them' "$(cat "$room/.moot/seen/board/tengu")" '20260829-100000-easyhog'
-check 'and a third sweep finds nothing' "$(m catchup --json --as tengu | grep -o '"scanned":[0-9]*')" '"scanned":0'
+  '"delivered":[{"room":"board","id":"20260829-100000-bob"},{"room":"board","id":"20260829-100000-carol"}]'
+check 'and moves the cursor onto them' "$(cat "$room/.moot/seen/board/alice")" '20260829-100000-carol'
+check 'and a third sweep finds nothing' "$(m catchup --json --as alice | grep -o '"scanned":[0-9]*')" '"scanned":0'
 thaw_date
 
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
-say 20260829-100000-easyhog 'first, same second'
+say 20260829-100000-carol 'first, same second'
 freeze_date 20260829-100000
-check 'read --new shows nothing from the current second' "$(m read --new --as tengu)" 'nothing new for tengu'
-[ -e "$room/.moot/seen/board/tengu" ] && no 'and writes no cursor' || ok 'and writes no cursor'
+check 'read --new shows nothing from the current second' "$(m read --new --as alice)" 'nothing new for alice'
+[ -e "$room/.moot/seen/board/alice" ] && no 'and writes no cursor' || ok 'and writes no cursor'
 say 20260829-100000-bob 'second, sorts first'
 thaw_date; freeze_date 20260829-100001
-out=$(m read --new --as tengu)
+out=$(m read --new --as alice)
 check 'the next read --new shows both' "$(printf '%s' "$out" | grep -c -e 'first, same second' -e 'second, sorts first')" '2'
 check 'in post-id order' "$(printf '%s' "$out" | grep -e 'first, same' -e 'second, sorts' | tr '\n' '|')" 'second, sorts first|first, same second|'
 check 'and the heading counts them' "$(printf '%s' "$out" | grep -c '══ board · 2 new ══')" '1'
@@ -918,28 +918,28 @@ room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2
 say 20260829-100000-bob 'now'
 say 20260829-100500-bob 'five minutes ahead of my clock'
 freeze_date 20260829-100000
-check 'a post stamped later than my clock is not swept yet' "$(m catchup --json --as tengu | grep -o '"scanned":[0-9]*')" '"scanned":0'
+check 'a post stamped later than my clock is not swept yet' "$(m catchup --json --as alice | grep -o '"scanned":[0-9]*')" '"scanned":0'
 thaw_date
-out=$(m catchup --json --as tengu)
+out=$(m catchup --json --as alice)
 check 'and is swept once the clock has passed it' "$(printf '%s' "$out" | grep -o '"scanned":[0-9]*')" '"scanned":2'
 # A stray file that is not a stamp never moves the cursor (it would sort after
 # every stamp, and park the cursor beyond every later post).
 say README 'not a post'
 say 20260829-100600-bob 'real post'
-out=$(m read --new --as tengu)
+out=$(m read --new --as alice)
 check 'a non-stamp file is not swept' "$(printf '%s' "$out" | grep -c 'not a post')" '0'
 check 'and does not hide the post after it' "$(printf '%s' "$out" | grep -c 'real post')" '1'
-check 'because the cursor stays on the last stamp' "$(cat "$room/.moot/seen/board/tengu")" '20260829-100600-bob'
+check 'because the cursor stays on the last stamp' "$(cat "$room/.moot/seen/board/alice")" '20260829-100600-bob'
 
 # read --new through a linked room: each repo's cursor stays in its own seen/.
 rp_dev() { printf '%s\n' "$2" > "$parent/.moot/rooms/dev/posts/$1.md"; }
 rp_dev 20260829-110000-bob '@all a late note'
 out=$(b read --new)
 check 'read --new reads a linked room' "$(printf '%s' "$out" | grep -c 'a late note')" '1'
-[ -f "$parent/bopOS/.moot/seen/dev/bopOS" ] && ok 'and its cursor is in the reading repo' || no 'and its cursor is in the reading repo'
-[ ! -e "$parent/.moot/seen/dev/bopOS" ] && ok 'and not in the room holder' || no 'and not in the room holder'
+[ -f "$parent/myapp/.moot/seen/dev/myapp" ] && ok 'and its cursor is in the reading repo' || no 'and its cursor is in the reading repo'
+[ ! -e "$parent/.moot/seen/dev/myapp" ] && ok 'and not in the room holder' || no 'and not in the room holder'
 check "so another repo's --new still shows the post" "$(e read --new | grep -c 'a late note')" '1'
-check 'and a second --new in the first repo shows nothing' "$(b read --new)" 'nothing new for bopOS'
+check 'and a second --new in the first repo shows nothing' "$(b read --new)" 'nothing new for myapp'
 
 # A room link whose relative target leads back to itself loops. join says so.
 loop=$(new_host)
@@ -957,17 +957,17 @@ ln -s "$work/nowhere-at-all" "$dangling/.moot/rooms/dev"
 group 'read headings are in local time'
 room=$(new_room)
 posts="$room/.moot/rooms/board/posts"
-printf 'late\n' > "$posts/20260828-233000-tengu.md"
+printf 'late\n' > "$posts/20260828-233000-alice.md"
 head_of() { "$room/.moot/moot.sh" read | grep -m1 '──'; }
 # POSIX zone strings, so the test needs no zoneinfo: XXX-11 is UTC+11.
 heading_checks() {
   local label=$1
-  case $(TZ=XXX-11 head_of) in *'2026-08-29 10:30:00 +1100 · tengu'*) ok "$label: a +1100 reader sees the next day, 10:30" ;; *) no "$label: a +1100 reader sees the next day, 10:30" "$(TZ=XXX-11 head_of)" ;; esac
-  case $(TZ=XXX+5 head_of) in *'2026-08-28 18:30:00 -0500 · tengu'*) ok "$label: a -0500 reader sees 18:30 the same day" ;; *) no "$label: a -0500 reader sees 18:30 the same day" "$(TZ=XXX+5 head_of)" ;; esac
+  case $(TZ=XXX-11 head_of) in *'2026-08-29 10:30:00 +1100 · alice'*) ok "$label: a +1100 reader sees the next day, 10:30" ;; *) no "$label: a +1100 reader sees the next day, 10:30" "$(TZ=XXX-11 head_of)" ;; esac
+  case $(TZ=XXX+5 head_of) in *'2026-08-28 18:30:00 -0500 · alice'*) ok "$label: a -0500 reader sees 18:30 the same day" ;; *) no "$label: a -0500 reader sees 18:30 the same day" "$(TZ=XXX+5 head_of)" ;; esac
   case $(TZ=XXX-11 head_of) in *UTC*) no "$label: a local heading does not say UTC" ;; *) ok "$label: a local heading does not say UTC" ;; esac
 }
 heading_checks 'native date'
-[ -e "$posts/20260828-233000-tengu.md" ] && ok 'the filename stays UTC' || no 'the filename stays UTC'
+[ -e "$posts/20260828-233000-alice.md" ] && ok 'the filename stays UTC' || no 'the filename stays UTC'
 
 # The other flavour of date, when this machine has one: GNU date as gdate on
 # macOS, or the reverse is not testable (a Linux box has no BSD date to shim).
@@ -993,7 +993,7 @@ fork_count() {
 }
 room=$(new_room)
 posts="$room/.moot/rooms/board/posts"
-for t in 100000 100100 100200 100300 100400; do printf 'x\n' > "$posts/20260829-$t-tengu.md"; done
+for t in 100000 100100 100200 100300 100400; do printf 'x\n' > "$posts/20260829-$t-alice.md"; done
 calls=$(fork_count)
 [ "$calls" -le 7 ] && ok "five headings cost $calls date forks (one each, plus at most two probes)" || no 'five headings cost one date fork each' "$calls forks"
 if command -v gdate >/dev/null 2>&1; then
@@ -1004,16 +1004,16 @@ fi
 # A name in posts/ that is not a stamp shows as itself, not as a garbled time.
 room=$(new_room)
 posts="$room/.moot/rooms/board/posts"
-printf 'odd\n' > "$posts/notastamp-tengu.md"
+printf 'odd\n' > "$posts/notastamp-alice.md"
 printf 'readme\n' > "$posts/README.md"
 out=$("$room/.moot/moot.sh" read)
-check 'a non-stamp id is its own heading' "$(printf '%s' "$out" | grep '──' | tr '\n' '|')" '── README ──|── notastamp-tengu ──|'
-printf 'real\n' > "$posts/20260828-233000-tengu.md"
+check 'a non-stamp id is its own heading' "$(printf '%s' "$out" | grep '──' | tr '\n' '|')" '── README ──|── notastamp-alice ──|'
+printf 'real\n' > "$posts/20260828-233000-alice.md"
 check 'a stamped post beside them still gets a time and a sender' \
-  "$(printf '%s' "$("$room/.moot/moot.sh" read)" | grep -c '· tengu ──')" '1'
+  "$(printf '%s' "$("$room/.moot/moot.sh" read)" | grep -c '· alice ──')" '1'
 # A well-formed stamp that is not a real time keeps the UTC label.
-printf 'impossible\n' > "$posts/20261399-250000-tengu.md"
-case $("$room/.moot/moot.sh" read | grep '──') in *'2026-13-99 25:00:00 UTC · tengu'*) ok 'a stamp that is not a time falls back to UTC, not an error' ;; *) no 'a stamp that is not a time falls back to UTC, not an error' ;; esac
+printf 'impossible\n' > "$posts/20261399-250000-alice.md"
+case $("$room/.moot/moot.sh" read | grep '──') in *'2026-13-99 25:00:00 UTC · alice'*) ok 'a stamp that is not a time falls back to UTC, not an error' ;; *) no 'a stamp that is not a time falls back to UTC, not an error' ;; esac
 
 # ---------------------------------------------------------------- read --new
 
@@ -1024,9 +1024,9 @@ mkdir -p "$parent/bob"
 m() { ( cd "$work" && MOOT_NAME= TZ=XXX-11 "$parent/bob/.moot/moot.sh" "$@" ); }
 m join runs >/dev/null; m join dev >/dev/null
 rp() { printf '%s\n' "$2" > "$parent/bob/.moot/rooms/$1/posts/$3.md"; }
-rp runs 'run one done' 20260829-100000-tengu
-rp runs '@bob please look' 20260829-110000-tengu
-rp dev  'dev note' 20260829-103000-easyhog
+rp runs 'run one done' 20260829-100000-alice
+rp runs '@bob please look' 20260829-110000-alice
+rp dev  'dev note' 20260829-103000-carol
 
 out=$(m read --new)
 check 'read --new with several rooms and no --room needs no choice' "$(printf '%s' "$out" | grep -c 'run one done')" '1'
@@ -1034,45 +1034,45 @@ check 'it shows every post, not just mentions' "$(printf '%s' "$out" | grep -c -
 check 'each room gets a heading with its count' "$(printf '%s' "$out" | grep -c -e '══ dev · 1 new ══' -e '══ runs · 2 new ══')" '2'
 check 'rooms stay separate: dev comes before runs, not interleaved by time' \
   "$(printf '%s' "$out" | grep -e 'dev note' -e 'run one' -e 'please look' | tr '\n' '|')" 'dev note|run one done|@bob please look|'
-case $out in *'2026-08-29 21:00:00 +1100 · tengu'*) ok 'headings are in local time' ;; *) no 'headings are in local time' ;; esac
+case $out in *'2026-08-29 21:00:00 +1100 · alice'*) ok 'headings are in local time' ;; *) no 'headings are in local time' ;; esac
 check 'the cursors moved to the newest post in each room' \
   "$(cat "$parent/bob/.moot/seen/runs/bob") $(cat "$parent/bob/.moot/seen/dev/bob")" \
-  '20260829-110000-tengu 20260829-103000-easyhog'
+  '20260829-110000-alice 20260829-103000-carol'
 check 'a second call shows nothing new' "$(m read --new)" 'nothing new for bob'
 
-rp runs 'run two done' 20260829-120000-tengu
+rp runs 'run two done' 20260829-120000-alice
 out=$(m read --new)
 check 'a later call shows only what arrived since' "$(printf '%s' "$out" | grep -c -e 'run two done' -e 'run one done' -e 'dev note')" '1'
 check 'and only the room that changed gets a heading' "$(printf '%s' "$out" | grep -c '══')" '1'
 
 # Plain read never touches the cursor.
-rp runs 'run three done' 20260829-130000-tengu
+rp runs 'run three done' 20260829-130000-alice
 m read --room runs >/dev/null
-check 'plain read leaves the cursor alone' "$(cat "$parent/bob/.moot/seen/runs/bob")" '20260829-120000-tengu'
+check 'plain read leaves the cursor alone' "$(cat "$parent/bob/.moot/seen/runs/bob")" '20260829-120000-alice'
 check 'so --new still shows what read showed' "$(m read --new | grep -c 'run three done')" '1'
 
 # --room narrows; the other room's cursor stays put.
-rp runs 'run four done' 20260829-140000-tengu
-rp dev  'dev two' 20260829-141000-easyhog
+rp runs 'run four done' 20260829-140000-alice
+rp dev  'dev two' 20260829-141000-carol
 out=$(m read --new --room dev)
 check '--new --room shows that room only' "$(printf '%s' "$out" | grep -c -e 'dev two' -e 'run four')" '1'
-check "and leaves the other room's cursor" "$(cat "$parent/bob/.moot/seen/runs/bob")" '20260829-130000-tengu'
+check "and leaves the other room's cursor" "$(cat "$parent/bob/.moot/seen/runs/bob")" '20260829-130000-alice'
 
 # The cursor is shared with catchup, in both directions.
 check 'catchup starts from the cursor --new left: it scans only what --new did not show' \
   "$(m catchup --json | grep -o '"scanned":[0-9]*' | tr '\n' ' ')" '"scanned":0 "scanned":1 '
-rp runs '@bob after catchup' 20260829-150000-tengu
-rp runs 'plain after catchup' 20260829-151000-tengu
+rp runs '@bob after catchup' 20260829-150000-alice
+rp runs 'plain after catchup' 20260829-151000-alice
 m catchup >/dev/null
-check 'catchup moves the cursor --new reads' "$(cat "$parent/bob/.moot/seen/runs/bob")" '20260829-151000-tengu'
+check 'catchup moves the cursor --new reads' "$(cat "$parent/bob/.moot/seen/runs/bob")" '20260829-151000-alice'
 check 'so --new shows nothing catchup already passed' "$(m read --new)" 'nothing new for bob'
-rp runs '@bob before new' 20260829-160000-tengu
+rp runs '@bob before new' 20260829-160000-alice
 m read --new >/dev/null
 check "and --new moves the cursor catchup reads: it finds nothing" "$(m catchup --json | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":0'
 
 # Names: --as picks the cursor; another name has its own.
-check 'another name starts from the top' "$(m read --new --as tengu | grep -c '══')" '2'
-check 'and keeps its own cursor' "$(m read --new --as tengu)" 'nothing new for tengu'
+check 'another name starts from the top' "$(m read --new --as alice | grep -c '══')" '2'
+check 'and keeps its own cursor' "$(m read --new --as alice)" 'nothing new for alice'
 
 # Options that fight the cursor are refused, not ignored.
 for opt in '--since x' '--tail 1' '--follow'; do
@@ -1085,7 +1085,7 @@ m read --new --room nonesuch >/dev/null 2>&1 && no '--new --room of an unknown r
 
 # A room that cannot take a cursor still reads, and says so.
 ro=$(new_room)
-printf 'hello\n' > "$ro/.moot/rooms/board/posts/20260829-100000-tengu.md"
+printf 'hello\n' > "$ro/.moot/rooms/board/posts/20260829-100000-alice.md"
 chmod a-w "$ro/.moot/seen/board" 2>/dev/null
 if [ -w "$ro/.moot/seen/board" ]; then
   ok '(skipped: running as a user who can write anywhere)'
