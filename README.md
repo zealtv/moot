@@ -455,8 +455,8 @@ folder, and the fix is to remove it and link again.
 
 `join` looks for a store in one place: a `.moots/` beside the folder that holds
 this `.moot/` (`~/work/.moots` for `~/work/myapp/.moot`). When `<room>` exists
-there, it refuses to make a private room of that name and prints the `ln -s` to
-run instead, and `post` warns on stderr, and still posts, when it writes to a
+there, it refuses to make a private room of that name and prints the `mkdir -p`
+and `ln -s` to run instead (a copied `.moot/` has no `rooms/` until something needs it), and `post` warns on stderr, and still posts, when it writes to a
 private room with a namesake there. A participant anywhere else, such as
 `~/.moot`, isn't checked: link its shared rooms by hand.
 

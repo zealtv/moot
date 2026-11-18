@@ -125,7 +125,7 @@ out=$(a join runs 2>&1); rc=$?
 check 'join refuses when a shared room of that name exists' "$rc" '1'
 check 'and writes no private room' "$(ls -A "$checkouts/app/.moot/rooms" | wc -l | tr -d ' ')" '0'
 check 'and prints the ln -s to run' "${out##*Link it instead: }" \
-  "ln -s $store $(cd "$checkouts/app" && pwd)/.moot/rooms/runs"
+  "mkdir -p $(cd "$checkouts/app" && pwd)/.moot/rooms && ln -s $store $(cd "$checkouts/app" && pwd)/.moot/rooms/runs"
 eval "${out##*Link it instead: }"
 a post --as alice -m 'hello' 2>"$work/err" >/dev/null
 check 'once linked, join works on the shared room' "$(a join runs)" 'joined rooms/runs'
@@ -133,6 +133,20 @@ check 'and a post lands in the shared room' "$(ls "$store/posts"/*.md | wc -l | 
 check 'and a linked room does not warn' "$(cat "$work/err")" ''
 a join dev >/dev/null
 check 'join still makes a room with no shared namesake' "$(ls -A "$checkouts/app/.moot/rooms/dev")" 'posts'
+
+# In a bare copy of .moot/ there is no rooms/ yet, so the printed command has to
+# make it: run it as printed in a fresh copy.
+bare=$(mktemp -d "$work/bare.XXXXXX"); mkdir -p "$bare/.moots/runs/posts" "$bare/app"
+cp -R "$repo/.moot" "$bare/app/"
+rm -rf -- "${bare:?}/app/.moot/rooms" "${bare:?}/app/.moot/seen"
+out=$("$bare/app/.moot/moot.sh" join runs 2>&1); rc=$?
+check 'join refuses in a bare copy too' "$rc" '1'
+[ ! -e "$bare/app/.moot/rooms" ] && ok 'and makes no rooms/ itself' || no 'and makes no rooms/ itself'
+bare_cmd=${out##*Link it instead: }
+case $bare_cmd in 'mkdir -p '*' && ln -s '*) ok 'and prints mkdir -p before ln -s' ;; *) no 'and prints mkdir -p before ln -s' "$bare_cmd" ;; esac
+(eval "$bare_cmd") && ok 'the printed command runs in a bare copy' || no 'the printed command runs in a bare copy'
+check 'and joining then works' "$("$bare/app/.moot/moot.sh" join runs)" 'joined rooms/runs'
+[ "$bare/.moots/runs" -ef "$bare/app/.moot/rooms/runs" ] && ok 'and the link leads to the shared room' || no 'and the link leads to the shared room'
 
 # A private room that predates the shared one still posts, with a warning.
 mkdir -p "$checkouts/.moots/dev/posts"

@@ -334,7 +334,7 @@ cmd_join() {
   if [ ! -e "$rooms_dir/$name" ] && [ ! -L "$rooms_dir/$name" ]; then
     local shared
     if shared=$(shared_room_dir "$name"); then
-      die "a shared room named $name exists at $shared; joining would make a private one that shadows it. Link it instead: ln -s $(printf '%q' "$shared") $(printf '%q' "$rooms_dir/$name")"
+      die "a shared room named $name exists at $shared; joining would make a private one that shadows it. Link it instead: mkdir -p $(printf '%q' "$rooms_dir") && ln -s $(printf '%q' "$shared") $(printf '%q' "$rooms_dir/$name")"
     fi
   fi
 

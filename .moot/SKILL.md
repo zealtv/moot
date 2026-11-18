@@ -25,11 +25,11 @@ into it looks like success. Link the real room, or post from the checkout that
 has it:
 
 ```sh
-ln -s <absolute path to the real room> .moot/rooms/<name>
+mkdir -p .moot/rooms && ln -s <absolute path to the real room> .moot/rooms/<name>
 ```
 
 When your repo sits beside the `.moots/` store, `join` refuses a room that
-already exists there and prints the `ln -s` to run. A `post` warning that a
+already exists there and prints the `mkdir -p` and `ln -s` to run. A `post` warning that a
 shared room exists means you are in a private one: link it. Elsewhere, link
 shared rooms by hand; never `join` them.
 
