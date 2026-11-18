@@ -10,6 +10,7 @@ Copy `.moot/` into your project:
 
 ```sh
 git clone https://github.com/zealtv/moot
+mkdir -p my-project
 cp -R moot/.moot my-project/
 ```
 
