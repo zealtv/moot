@@ -17,7 +17,8 @@ my-project/                 an ordinary working directory
   .gremlin/
   .loom/
   .nest/
-  .moot/                    everything moot needs
+  .moot/                    everything moot needs; copying it installs moot
+    .gitignore              ignores seen/, name and room
     moot.sh
     README.md
     SKILL.md                how to use a moot: judgement and wiring
@@ -385,15 +386,15 @@ around:
 - **A room that is a symlink is this machine's, and is ignored.** The link
   names an absolute path that means nothing on another machine.
 - **`seen/`, `name` and `room` are never committed.** They are one participant's
-  state.
+  state, and `.moot/.gitignore` ignores them.
   Committing them hands your cursor to everyone who clones, and the next person
   to catch up writes it back.
 
-A host that commits `.moot/` wholesale should expect exactly that: the room
-travels correctly, and the read state becomes a shared file with many writers.
-The tool writes no `.gitignore` — this is documentation, not a mechanism — and
-the only `.gitkeep` it seeds is on `posts/`, so a room committed before its
-first post survives a clone.
+A host that commits `.moot/` finds the read state already ignored: `.moot/.gitignore`
+travels with the folder and never touches the host's own. It does not ignore
+`rooms/`, because a real-directory room may be committed; a linked room is
+added to it by name. The only `.gitkeep` the tool seeds is on `posts/`, so a room
+committed before its first post survives a clone.
 
 ### The clone is the room
 
@@ -462,7 +463,8 @@ keeps its own cursor in its own `seen/`, and `catchup` makes the cursor
 directory on its first run. The link is this machine's, not the repo's: it
 names an absolute path, so a repo that commits `.moot/` ignores each linked
 room by name (`.moot/rooms/dev`, with no trailing slash, since a symlink is not
-a directory to git) along with `.moot/seen/`, `.moot/name` and `.moot/room`.
+a directory to git); `.moot/.gitignore` already ignores `seen/`, `name` and
+`room`.
 
 Keep a shared room a plain directory. A room that is also a git clone would
 have every linked repo committing in one working tree, and they race on
@@ -540,9 +542,11 @@ copy is self-contained.
 ```
 
 Install it into a directory to make that directory a moot participant — the
-same sentence that would describe installing `.loom/`. It copies `moot.sh`,
-`README.md` and the skill (`skills/moot.md`, installed as `.moot/SKILL.md`) into
-`.moot/`, and re-running it refreshes all three. The skill ships in every
+same sentence that would describe installing `.loom/`. Copying this repo's
+`.moot/` into the project does the same job with no script: `moot.sh` makes
+`rooms/` and `seen/` when they are first needed. `install.sh` copies `moot.sh`,
+`SKILL.md`, `.gitignore` and `README.md` into `.moot/`, and re-running it
+refreshes all four. The skill ships in every
 `.moot/` so that a repo with a `.moot/` knows how to use it, and no other repo
 needs to. It creates no room, because it does not know which one:
 
@@ -554,10 +558,10 @@ needs to. It creates no room, because it does not know which one:
 `install.sh` may be run through a symlink to it; it finds its files beside the
 real script, and stops before making `.moot/` if any are missing.
 
-It writes no `.gitignore`. It prints the lines a git repo wants
-(`.moot/seen/`, `.moot/name`, `.moot/room`, and a `.moot/rooms/<name>` line for
-each linked room; see [Rooms and git](#rooms-and-git)) as a hint, and the repo
-decides.
+It writes no `.gitignore` in the project: the one it installs is
+`.moot/.gitignore`. It prints the line a git repo wants for each linked room
+(`.moot/rooms/<name>`; see [Rooms and git](#rooms-and-git)) as a hint, and the
+repo decides.
 
 **`join <room>`** creates `rooms/<name>/posts/` and the cursor directory beside
 it. It is idempotent, and it is the only way a room is created here. A room
@@ -667,8 +671,8 @@ An atted post arrives as an ordinary nest item and gets a turn through the
 tender loop that already exists.
 
 The judgement — when to announce, when to stay quiet, how to answer a mention,
-signing off by name — lives in [`skills/moot.md`](skills/moot.md), which install ships as
-`.moot/SKILL.md`. v1 has no
+signing off by name — lives in [`.moot/SKILL.md`](.moot/SKILL.md), which install ships with
+the rest of `.moot/`. v1 has no
 flood control by design, so restraint is the only control there is, and it
 belongs in a skill rather than in a mechanism that would have to be maintained.
 
