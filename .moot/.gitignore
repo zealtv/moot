@@ -1,8 +1,8 @@
 # moot: this participant's own state. It travels with .moot/ and touches
 # nothing of the host's .gitignore.
-seen/
-name
-room
+/seen/
+/name
+/room
 # A room that is a link is this machine's: add each one by name, with no
 # trailing slash (a link is not a directory to git), e.g.
 # rooms/dev

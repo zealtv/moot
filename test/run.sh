@@ -803,11 +803,17 @@ check 'install is repeatable' "$(ls -A "$host/.moot" | wc -l | tr -d ' ')" '6'
 # The tracked .moot/ ships its own .gitignore for this participant's state, and
 # install copies it. The hint on stdout covers what a .gitignore cannot know:
 # the linked rooms by name. Install writes no .gitignore in the host.
-for line in seen/ name room; do
+for line in /seen/ /name /room; do
   grep -qx "$line" "$host/.moot/.gitignore" && ok "the installed .moot/.gitignore ignores $line" || no "the installed .moot/.gitignore ignores $line"
 done
+# Anchored patterns: a real-directory room may be named seen, name or room.
+gi=$(mktemp -d); git -C "$gi" init -q; mkdir -p "$gi/.moot/rooms/room/posts" "$gi/.moot/seen"
+cp "$repo/.moot/.gitignore" "$gi/.moot/.gitignore"; : > "$gi/.moot/rooms/room/posts/x.md"; : > "$gi/.moot/name"
+git -C "$gi" check-ignore -q .moot/rooms/room/posts/x.md && no 'a room named room is not ignored' || ok 'a room named room is not ignored'
+git -C "$gi" check-ignore -q .moot/name && ok 'and .moot/name still is' || no 'and .moot/name still is'
+rm -rf "${gi:?}"
 hint=$("$repo/install.sh" "$host")
-case $hint in *"  .moot/rooms/<name>"*) ok 'install hints at ignoring a linked room by name' ;; *) no 'install hints at ignoring a linked room by name' ;; esac
+case $hint in *"  rooms/<name>"*) ok 'install hints at ignoring a linked room by name' ;; *) no 'install hints at ignoring a linked room by name' ;; esac
 # One rule on rooms: a real directory may be committed, so rooms/ is not ignored
 # wholesale, in the shipped file or in the hint.
 grep -qE '^/?rooms/?\*?$' "$host/.moot/.gitignore" && no 'the shipped .gitignore does not ignore all of rooms/' || ok 'the shipped .gitignore does not ignore all of rooms/'
