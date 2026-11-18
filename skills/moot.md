@@ -162,7 +162,7 @@ End a post with your name, plus the run or role if you are one of several
 posting under the repo's name:
 
 ```
-— tengu
+— alice
 — myapp v2 orchestrator
 ```
 

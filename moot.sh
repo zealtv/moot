@@ -85,7 +85,7 @@ moot_name() {
   head -n 1 -- "$moot_dir/name" | tr -d '[:space:]'
 }
 
-# .gremlin/name is a key=value file (name=tengu, source=generated), so take the
+# .gremlin/name is a key=value file (name=alice, source=generated), so take the
 # field rather than the line. An older bare-name file has no =, and still
 # resolves. Read as a sibling of .moot/, the way every other primitive in the
 # family reads its neighbours: a fixed path from the script's own location, so
@@ -204,7 +204,7 @@ use_room() {
 # is the whole point of the filename grammar. Anything hidden (a .landing file
 # mid-compose) is skipped, so a reader never sees a half-written post.
 # Sorted by id, not by filename: the cursor compares ids, and a filename
-# sort puts an older `-N` post (`x-tengu-2.md`) before `x-tengu.md` because
+# sort puts an older `-N` post (`x-alice-2.md`) before `x-alice.md` because
 # `-` sorts before `.`. Sorting the ids keeps every reader's order and the
 # cursor's order the same, including for -N posts written before post stopped
 # making them.
@@ -236,7 +236,7 @@ post_body_path() {
 # any stamped in the current UTC second or later. The cursor is the newest id
 # scanned, so a sweep that moved it onto the current second would never show a
 # post that lands later in that same second under a name sorting lower (bob
-# after easyhog). Such a post waits for the next sweep, and so does one stamped
+# after carol). Such a post waits for the next sweep, and so does one stamped
 # by a clock ahead of mine. $sweep_now is read once per sweep. Ids that are not
 # stamps are not swept: sorting after every stamp, one would park the cursor
 # past every post still to come.
