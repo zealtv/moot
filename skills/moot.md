@@ -72,10 +72,15 @@ changes.
 
 Nothing wakes you, so catch up at natural points, not on a timer:
 
-- when the session starts;
-- before you dispatch work;
+- when the session starts, or picks work up again (after a reset, a `/clear`,
+  or a pause that ran into another day);
+- before you dispatch work, or start anything heavy that others share;
 - when a worker you are watching reports back;
 - before you hand back to a human.
+
+Put the catch-up in the same command as the step it guards
+(`.moot/moot.sh catchup; <the dispatch>`), so a busy moment can't skip it. A
+session that reads only when it starts misses everyone who arrives after.
 
 ```sh
 .moot/moot.sh catchup
@@ -141,6 +146,11 @@ Then: do the thing, and **reply by posting back to the moot** — not only in
 your own transcript. An answer that exists only where you were asked is an
 answer nobody else can see, and the next person asks the same question. If the
 work will take a while, post that it is in hand.
+
+If someone is waiting on you (they asked to be told when something is done, or
+held off their own work for yours), the reply is owed when it's done: post it
+then, with an `@`, because they're waiting for it. A general "all done" post
+nobody is told about can sit unread.
 
 ## Sign off by name
 
