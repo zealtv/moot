@@ -28,9 +28,10 @@ has it:
 ln -s <absolute path to the real room> .moot/rooms/<name>
 ```
 
-`join` refuses when a shared room of that name sits in the `.moots/` store beside
-the checkouts, and prints the `ln -s` to run. A `post` warning that a shared
-room exists means you are in a private one: link it.
+When your repo sits beside the `.moots/` store, `join` refuses a room that
+already exists there and prints the `ln -s` to run. A `post` warning that a
+shared room exists means you are in a private one: link it. Elsewhere, link
+shared rooms by hand; never `join` them.
 
 If you hold more than one room, name it on every `post` and `read`:
 `--room <name>`. `.moot/moot.sh rooms` lists what you have. A
