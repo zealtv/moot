@@ -26,15 +26,15 @@ my-project/                 an ordinary working directory
     rooms/
       board/                this folder is what syncs
         posts/
-          20260829-163412-tengu.md
+          20260829-163412-alice.md
           20260829-164070-bob/
             post.md
             diff.patch
       release/
         posts/
     seen/
-      board/tengu           my cursor for that room: one post id
-      release/tengu
+      board/alice           my cursor for that room: one post id
+      release/alice
 ```
 
 **A room is a folder, and `posts/` is all of it.** The folder is
@@ -45,7 +45,7 @@ immutable.
 it is in. A project may hold `.lore/`, `.loom/`, `.nest/`, `.gremlin/` and
 `.moot/` as peers, and each of them is self-contained: the script and its data
 bundled in one dotdir — `.loom/threads/`, `.glean/findings/`, `.nest/in/`,
-`.moot/rooms/`. Moot is not the exception it used to be.
+`.moot/rooms/`.
 
 **The cursor is the participant's, not the room's.** `seen/` sits *beside*
 `rooms/` rather than inside one, because `rooms/<name>/` is the folder that
@@ -107,8 +107,8 @@ second writer waits for the next second and stamps again, so the name never
 grows a suffix and lexical order stays the order things were written:
 
 ```text
-20260829-163412-tengu.md
-20260829-163413-tengu.md
+20260829-163412-alice.md
+20260829-163413-alice.md
 ```
 
 By hand, posting twice in one second takes effort; if the name is already
@@ -120,7 +120,7 @@ second apart and none is lost. `post` gives up only when the clock itself
 stays on one second for six tries in a row ("the clock is not moving").
 
 Rooms from before this rule may hold `-2`, `-3` names
-(`20260829-163412-tengu-2.md`). They are still posts: readers sort by post id,
+(`20260829-163412-alice-2.md`). They are still posts: readers sort by post id,
 which puts each one after the name without the suffix, and the sender shown is
 the rest of the id, suffix included.
 
@@ -240,15 +240,14 @@ layer.
 **A sweep leaves the current second for the next sweep.** The cursor is the
 newest post id scanned, and ids sort by sender within a second. A post that
 lands in the second a sweep reads, from a sender sorting below the cursor's
-(`...-100000-bob` after a cursor at `...-100000-easyhog`), would sit behind the
+(`...-100000-bob` after a cursor at `...-100000-carol`), would sit behind the
 cursor and never be shown. So a sweep reads the clock once and scans only posts
 stamped before the current UTC second; the rest wait, and the cursor stops at
 the last post it did scan. This holds for `catchup` and `read --new` alike.
 A post stamped by a clock ahead of mine waits until mine catches up. Ids that
 are not stamps (a stray `README.md` in `posts/`) are not swept at all, because
 they would sort after every stamp and carry the cursor past everything still to
-come; plain `read` still lists them. (Added 2026-11-16 after the milestone review; not yet
-exercised by a real trial.) One thing remains outside this rule: a post that
+come; plain `read` still lists them. One thing remains outside this rule: a post that
 reaches the room late by sync (rsync or git) with a stamp older than the
 cursor stays unseen, as before.
 
@@ -270,14 +269,14 @@ own room, so nothing has to parse a filename to know which board a mention came
 from, and a `rooms` array carries the cursor detail for whoever wants it.
 
 ```json
-{"schema_version":2,"command":"catchup","ok":true,"changed":true,"sender":"tengu",
+{"schema_version":2,"command":"catchup","ok":true,"changed":true,"sender":"alice",
  "rooms":[{"room":"board","since":null,"cursor":"20260829-100100-bob",
            "cursor_written":true,"scanned":2,"delivered":1}],
  "delivered":[{"room":"board","id":"20260829-100100-bob"}]}
 ```
 
-Mentions match exactly, so `@all` is lowercase and `@tengulike` is not
-`@tengu`. Trailing sentence punctuation is trimmed, so `@tengu.` still lands.
+Mentions match exactly, so `@all` is lowercase and `@alicelike` is not
+`@alice`. Trailing sentence punctuation is trimmed, so `@alice.` still lands.
 
 ### Catching up as a human: `read --new`
 
@@ -298,7 +297,6 @@ anything it says `nothing new for <name>`.
 advance it. For one reader that is the intended behaviour: `read --new` shows a
 superset of what `catchup` would have printed, so whichever ran last has
 covered everything before it, and the other finds nothing left to say.
-(Design decision of 2026-11-16, not yet exercised by a real trial.)
 
 What follows from sharing:
 
@@ -323,7 +321,7 @@ time with `read`. Nothing is hidden from a participant — it just does not
 interrupt them.
 
 So a mention can arrive without the context that led to it: the cursor may have
-advanced silently past thirty announcements before one says "@tengu can you
+advanced silently past thirty announcements before one says "@alice can you
 handle the thing bob raised earlier?". A delivered item therefore carries **the
 room it came from, the path to it, and its own post id**, not just the body —
 its read-back line is complete, `--room` included. The recipient reads
@@ -696,4 +694,4 @@ present.
 
 This is the board-first release. Group chat — flood control, silence,
 turn-taking, addressing semantics, invitations, trust, sync-latency UX — is a
-later design problem, to be opened only once a real trial supplies evidence.
+later design problem, to be opened only once real use supplies evidence.
