@@ -4,11 +4,13 @@
 #
 #   ./install.sh /path/to/dir
 #
-# Copies moot.sh, README.md and the skill (skills/moot.md, installed as
-# SKILL.md) into <dir>/.moot/, then runs init. Everything moot needs lives
+# Copies what this repo's .moot/ ships (moot.sh, SKILL.md and .gitignore) and
+# the README into <dir>/.moot/, then runs init. Everything moot needs lives
 # under .moot/ — the rooms it holds and this participant's read state — so
 # .moot/ sits beside .loom/ and .gremlin/ and claims nothing of the directory
-# it is in. Re-running refreshes all three files.
+# it is in. Re-running refreshes all four files.
+#
+# Copying the repo's .moot/ by hand does the same job without this script.
 #
 # The skill ships in every .moot/ so that a repo with a .moot/ knows how to use
 # it, and no other repo needs to.
@@ -18,13 +20,14 @@
 #
 #   <dir>/.moot/moot.sh join board
 #
-# It writes no .gitignore (moot writes none). It prints the lines a git repo
-# wants, as a hint, and the repo decides.
+# The .gitignore it installs is .moot/.gitignore, which ignores this
+# participant's seen/, name and room and never touches the host's own. It
+# prints the line a git repo wants for each linked room, as a hint.
 
 set -euo pipefail
 
 # Where this script really lives, so a symlink to it (~/bin/moot-install, say)
-# still finds moot.sh, README.md and skills/ beside the real file. A relative
+# still finds .moot/ and README.md beside the real file. A relative
 # link target is relative to the folder holding the link.
 src=${BASH_SOURCE[0]}
 while [ -L "$src" ]; do
@@ -40,21 +43,21 @@ host=$(cd -- "$host" && pwd)
 
 # Look before making anything: a missing source file used to fail at cp and
 # leave an empty .moot/ behind.
-for f in moot.sh README.md skills/moot.md; do
+for f in .moot/moot.sh .moot/SKILL.md .moot/.gitignore README.md; do
   [ -r "$source_dir/$f" ] || { printf 'install: cannot find %s beside install.sh (looked in %s)\n' "$f" "$source_dir" >&2; exit 1; }
 done
 
 mkdir -p -- "$host/.moot"
-cp -- "$source_dir/moot.sh" "$host/.moot/moot.sh"
+cp -- "$source_dir/.moot/moot.sh" "$host/.moot/moot.sh"
 cp -- "$source_dir/README.md" "$host/.moot/README.md"
-cp -- "$source_dir/skills/moot.md" "$host/.moot/SKILL.md"
+cp -- "$source_dir/.moot/SKILL.md" "$host/.moot/SKILL.md"
+cp -- "$source_dir/.moot/.gitignore" "$host/.moot/.gitignore"
 chmod +x "$host/.moot/moot.sh"
 
 "$host/.moot/moot.sh" init >/dev/null
 printf 'installed moot into %s/.moot\n' "$host"
 printf 'join a room with: %s/.moot/moot.sh join <room>\n' "$host"
-printf 'if that is a git repo, add these to its .gitignore (they are one participant'"'"'s state):\n'
-printf '  .moot/seen/\n  .moot/name\n  .moot/room\n'
-printf 'a room that is a real directory may be committed; a room that is a symlink is this\n'
-printf "machine's, so ignore it by name, with no trailing slash:\n"
+printf "a linked room is this machine's, so a git repo ignores it by name, with no\n"
+printf 'trailing slash (.moot/.gitignore already ignores seen/, name and room):\n'
 printf '  .moot/rooms/<name>\n'
+printf 'a room that is a real directory may be committed.\n'

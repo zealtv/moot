@@ -779,29 +779,33 @@ host=$(new_host)
 [ -x "$host/.moot/moot.sh" ] && ok 'install deploys an executable moot.sh' || no 'install deploys an executable moot.sh'
 [ -f "$host/.moot/README.md" ] && ok 'install deploys the README' || no 'install deploys the README'
 [ -f "$host/.moot/SKILL.md" ] && ok 'install deploys the skill as SKILL.md' || no 'install deploys the skill as SKILL.md'
-cmp -s "$repo/skills/moot.md" "$host/.moot/SKILL.md" && ok 'SKILL.md is the skill from skills/moot.md' || no 'SKILL.md is the skill from skills/moot.md'
+cmp -s "$repo/.moot/SKILL.md" "$host/.moot/SKILL.md" && ok 'SKILL.md is the skill from .moot/SKILL.md' || no 'SKILL.md is the skill from .moot/SKILL.md'
 check 'install claims nothing outside .moot/' "$(ls -A "$host")" '.moot'
 printf 'stale\n' > "$host/.moot/SKILL.md"
 "$repo/install.sh" "$host" >/dev/null
-cmp -s "$repo/skills/moot.md" "$host/.moot/SKILL.md" && ok 're-running install refreshes the skill' || no 're-running install refreshes the skill'
-check 'install is repeatable' "$(ls -A "$host/.moot" | wc -l | tr -d ' ')" '5'
+cmp -s "$repo/.moot/SKILL.md" "$host/.moot/SKILL.md" && ok 're-running install refreshes the skill' || no 're-running install refreshes the skill'
+check 'install is repeatable' "$(ls -A "$host/.moot" | wc -l | tr -d ' ')" '6'
 
-# The ignore lines are a hint on stdout; install writes no .gitignore itself.
-hint=$("$repo/install.sh" "$host")
-for line in '.moot/seen/' '.moot/name' '.moot/room' '.moot/rooms/<name>'; do
-  case $hint in *"  $line"*) ok "install hints at ignoring $line" ;; *) no "install hints at ignoring $line" ;; esac
+# The tracked .moot/ ships its own .gitignore for this participant's state, and
+# install copies it. The hint on stdout covers what a .gitignore cannot know:
+# the linked rooms by name. Install writes no .gitignore in the host.
+for line in seen/ name room; do
+  grep -qx "$line" "$host/.moot/.gitignore" && ok "the installed .moot/.gitignore ignores $line" || no "the installed .moot/.gitignore ignores $line"
 done
-# One rule on rooms: a real directory may be committed, so the hint must not
-# ignore the whole rooms/ directory (that was the old, contradicting hint).
+hint=$("$repo/install.sh" "$host")
+case $hint in *"  .moot/rooms/<name>"*) ok 'install hints at ignoring a linked room by name' ;; *) no 'install hints at ignoring a linked room by name' ;; esac
+# One rule on rooms: a real directory may be committed, so rooms/ is not ignored
+# wholesale, in the shipped file or in the hint.
+grep -qE '^/?rooms/?\*?$' "$host/.moot/.gitignore" && no 'the shipped .gitignore does not ignore all of rooms/' || ok 'the shipped .gitignore does not ignore all of rooms/'
 case $hint in *"  .moot/rooms/"$'\n'*) no 'install does not hint at ignoring all of rooms/' ;; *) ok 'install does not hint at ignoring all of rooms/' ;; esac
-[ ! -e "$host/.gitignore" ] && ok 'install writes no .gitignore' || no 'install writes no .gitignore'
+[ ! -e "$host/.gitignore" ] && ok 'install writes no .gitignore in the host' || no 'install writes no .gitignore in the host'
 
 # Run through a symlink, install still finds the files beside the real script,
 # whether the link target is absolute or relative to the link's folder.
 host=$(mktemp -d "$work/viaarg.XXXXXX"); bindir=$(mktemp -d "$work/bin-links.XXXXXX")
 ln -s "$repo/install.sh" "$bindir/moot-install"
 "$bindir/moot-install" "$host" >/dev/null 2>&1 && ok 'install runs through an absolute symlink' || no 'install runs through an absolute symlink'
-cmp -s "$repo/moot.sh" "$host/.moot/moot.sh" && ok 'and installs the real moot.sh' || no 'and installs the real moot.sh'
+cmp -s "$repo/.moot/moot.sh" "$host/.moot/moot.sh" && ok 'and installs the real moot.sh' || no 'and installs the real moot.sh'
 host=$(mktemp -d "$work/viarel.XXXXXX"); mkdir -p "$work/two/bin"
 ln -s "$repo" "$work/two/repo"; ln -s ../repo/install.sh "$work/two/bin/link-install"
 "$work/two/bin/link-install" "$host" >/dev/null 2>&1 && ok 'install runs through a relative symlink' || no 'install runs through a relative symlink'
@@ -809,7 +813,7 @@ ln -s "$repo" "$work/two/repo"; ln -s ../repo/install.sh "$work/two/bin/link-ins
 host=$(mktemp -d "$work/lonely.XXXXXX"); mkdir "$work/lonely-src"; cp "$repo/install.sh" "$work/lonely-src/"
 err=$("$work/lonely-src/install.sh" "$host" 2>&1 >/dev/null); rc=$?
 [ "$rc" -ne 0 ] && ok 'install with files missing fails' || no 'install with files missing fails'
-check 'and says what it could not find' "$(printf '%s' "$err" | grep -c 'cannot find moot.sh')" '1'
+check 'and says what it could not find' "$(printf '%s' "$err" | grep -c 'cannot find .moot/moot.sh')" '1'
 [ -e "$host/.moot" ] && no 'and leaves no empty .moot/ behind' || ok 'and leaves no empty .moot/ behind'
 
 # .moot/ is a dotdir among dotdirs: installing beside the rest of the family
@@ -821,6 +825,36 @@ printf 'a thread\n' > "$host/.loom/threads/keep.md"
 check 'install leaves .loom/ alone' "$(cat "$host/.loom/threads/keep.md")" 'a thread'
 [ -d "$host/.nest/in" ] && ok 'install leaves .nest/ alone' || no 'install leaves .nest/ alone'
 check 'and the dotdirs are peers' "$(ls -A "$host" | tr '\n' ' ')" '.loom .moot .nest '
+
+# The repo's own .moot/ is the copy unit: copied bare into an empty folder, with
+# no install step, it works.
+group 'plain copy of .moot/'
+[ -x "$repo/.moot/moot.sh" ] && ok 'the repo tracks an executable .moot/moot.sh' || no 'the repo tracks an executable .moot/moot.sh'
+[ -f "$repo/.moot/SKILL.md" ] && ok 'the repo tracks .moot/SKILL.md' || no 'the repo tracks .moot/SKILL.md'
+[ ! -e "$repo/.gitignore" ] && ok 'the repo has no root .gitignore' || no 'the repo has no root .gitignore'
+[ ! -e "$repo/moot.sh" ] && ok 'the repo has no root moot.sh' || no 'the repo has no root moot.sh'
+plain=$(mktemp -d "$work/plain.XXXXXX")
+cp -R "$repo/.moot" "$plain/"
+# Remove any state a run in the repo itself left in the copy; the copy under
+# test starts as a fresh checkout would.
+rm -rf -- "${plain:?}/.moot/seen" "${plain:?}/.moot/rooms" "${plain:?}/.moot/name" "${plain:?}/.moot/room"
+check 'a bare copy lists no rooms' "$("$plain/.moot/moot.sh" rooms)" "no rooms here yet: $plain/.moot/moot.sh join <room>"
+"$plain/.moot/moot.sh" catchup --as alice >/dev/null && ok 'catchup works before any room' || no 'catchup works before any room'
+"$plain/.moot/moot.sh" join board >/dev/null && ok 'a bare copy joins a room with no init' || no 'a bare copy joins a room with no init'
+"$plain/.moot/moot.sh" post --as alice -m 'hello' >/dev/null && ok 'a bare copy posts' || no 'a bare copy posts'
+out=$("$plain/.moot/moot.sh" read)
+case $out in *hello*) ok 'a bare copy reads the post back' ;; *) no 'a bare copy reads the post back' "$out" ;; esac
+# catchup leaves the current second for the next sweep, so give it an older post.
+printf '@bob hello\n' > "$plain/.moot/rooms/board/posts/20260829-090000-alice.md"
+"$plain/.moot/moot.sh" catchup --as bob >/dev/null && ok 'a bare copy catches up' || no 'a bare copy catches up'
+[ -f "$plain/.moot/seen/board/bob" ] && ok 'and keeps the cursor in its own seen/' || no 'and keeps the cursor in its own seen/'
+check 'the copy touches nothing outside .moot/' "$(ls -A "$plain")" '.moot'
+# The tracked .moot/ carries no instance state: nothing git tracks there is
+# per-participant.
+if git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+  tracked=$(git -C "$repo" ls-files .moot | grep -E '^\.moot/(seen|rooms)/|^\.moot/(name|room)$' || true)
+  check 'the repo tracks no instance state in .moot/' "$tracked" ''
+fi
 
 # Each participant keeps a copy of the room, and their state inside it. The
 # folder that syncs is posts/, and nothing in it is written by two hands.
