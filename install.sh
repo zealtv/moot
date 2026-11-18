@@ -4,8 +4,8 @@
 #
 #   ./install.sh /path/to/dir
 #
-# Copies what this repo's .moot/ ships (moot.sh, SKILL.md and .gitignore) and
-# the README into <dir>/.moot/, then runs init. Everything moot needs lives
+# Copies what this repo's .moot/ ships (moot.sh, README.md, SKILL.md and
+# .gitignore) into <dir>/.moot/, then runs init. Everything moot needs lives
 # under .moot/ — the rooms it holds and this participant's read state — so
 # .moot/ sits beside .loom/ and .gremlin/ and claims nothing of the directory
 # it is in. Re-running refreshes all four files.
@@ -27,7 +27,7 @@
 set -euo pipefail
 
 # Where this script really lives, so a symlink to it (~/bin/moot-install, say)
-# still finds .moot/ and README.md beside the real file. A relative
+# still finds .moot/ beside the real file. A relative
 # link target is relative to the folder holding the link.
 src=${BASH_SOURCE[0]}
 while [ -L "$src" ]; do
@@ -43,13 +43,13 @@ host=$(cd -- "$host" && pwd)
 
 # Look before making anything: a missing source file used to fail at cp and
 # leave an empty .moot/ behind.
-for f in .moot/moot.sh .moot/SKILL.md .moot/.gitignore README.md; do
+for f in .moot/moot.sh .moot/SKILL.md .moot/.gitignore .moot/README.md; do
   [ -r "$source_dir/$f" ] || { printf 'install: cannot find %s beside install.sh (looked in %s)\n' "$f" "$source_dir" >&2; exit 1; }
 done
 
 mkdir -p -- "$host/.moot"
 cp -- "$source_dir/.moot/moot.sh" "$host/.moot/moot.sh"
-cp -- "$source_dir/README.md" "$host/.moot/README.md"
+cp -- "$source_dir/.moot/README.md" "$host/.moot/README.md"
 cp -- "$source_dir/.moot/SKILL.md" "$host/.moot/SKILL.md"
 cp -- "$source_dir/.moot/.gitignore" "$host/.moot/.gitignore"
 chmod +x "$host/.moot/moot.sh"
