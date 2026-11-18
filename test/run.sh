@@ -573,7 +573,7 @@ check 'the host folder name is the last resort, not $USER' "$(sender_of "$named"
 ( cd / && env -u MOOT_NAME -u USER "$named/.moot/moot.sh" post -m 'y' >/dev/null )
 check 'and needs no $USER at all' "$(ls "$named/.moot/rooms/board/posts" | grep -c 'myApp')" '2'
 
-spaced="$work/Pedal Board"; mkdir -p "$spaced"
+spaced="$work/My Project"; mkdir -p "$spaced"
 "$repo/install.sh" "$spaced" >/dev/null; "$spaced/.moot/moot.sh" join board >/dev/null
 err=$( cd "$work" && MOOT_NAME= "$spaced/.moot/moot.sh" post -m 'x' 2>&1 >/dev/null ) \
   && no 'an unsafe folder name is an error' || ok 'an unsafe folder name is an error'
@@ -846,24 +846,24 @@ parent=$(mktemp -d "$work/repos.XXXXXX")
 "$repo/install.sh" "$parent" >/dev/null
 printf 'bob\n' > "$parent/.moot/name"
 "$parent/.moot/moot.sh" join dev >/dev/null
-for r in myapp carol; do
+for r in myApp carol; do
   mkdir -p "$parent/$r"
   "$repo/install.sh" "$parent/$r" >/dev/null
   ln -s "$parent/.moot/rooms/dev" "$parent/$r/.moot/rooms/dev"
 done
-b() { ( cd "$work" && MOOT_NAME= "$parent/myapp/.moot/moot.sh" "$@" ); }
+b() { ( cd "$work" && MOOT_NAME= "$parent/myApp/.moot/moot.sh" "$@" ); }
 e() { ( cd "$work" && MOOT_NAME= "$parent/carol/.moot/moot.sh" "$@" ); }
 h() { ( cd "$work" && MOOT_NAME= "$parent/.moot/moot.sh" "$@" ); }
 
 check 'a linked room is a room' "$(b rooms | grep -c dev)" '1'
 step_date 20260829-100000 20260829-100000 20260829-100000
 b post -m '@carol dispatching two workers' >/dev/null
-e post -m '@myapp ok, holding mine' >/dev/null
+e post -m '@myApp ok, holding mine' >/dev/null
 h post -m '@all usage is fine' >/dev/null
 thaw_step
 check 'three repos posting in one second get three ids' \
   "$(ls "$parent/.moot/rooms/dev/posts" | tr '\n' ' ')" \
-  '20260829-100000-bob.md 20260829-100000-carol.md 20260829-100000-myapp.md '
+  '20260829-100000-bob.md 20260829-100000-carol.md 20260829-100000-myApp.md '
 
 out_e=$(e catchup --json)
 check 'each repo catches up under its folder name' "$(printf '%s' "$out_e" | grep -o '"sender":"[^"]*"')" '"sender":"carol"'
@@ -872,7 +872,7 @@ check 'and gets what mentions it' "$(printf '%s' "$out_e" | grep -o '"delivered"
 [ ! -e "$parent/.moot/seen/dev/carol" ] && ok 'and never in the room holder' || no 'and never in the room holder'
 [ ! -e "$parent/.moot/rooms/dev/seen" ] && [ "$(ls -A "$parent/.moot/rooms/dev")" = posts ] \
   && ok 'the shared room holds posts/ and nothing else' || no 'the shared room holds posts/ and nothing else'
-check "one repo's catchup leaves another's cursor alone" "$(ls -A "$parent/myapp/.moot/seen/dev" 2>/dev/null | wc -l | tr -d ' ')" '0'
+check "one repo's catchup leaves another's cursor alone" "$(ls -A "$parent/myApp/.moot/seen/dev" 2>/dev/null | wc -l | tr -d ' ')" '0'
 out_b=$(b catchup --json)
 check 'the other repo still gets its own mentions' "$(printf '%s' "$out_b" | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":2'
 check 'and a second sweep delivers nothing twice' "$(b catchup --json | grep -o '"delivered":[0-9]*' | head -n 1)" '"delivered":0'
@@ -936,10 +936,10 @@ rp_dev() { printf '%s\n' "$2" > "$parent/.moot/rooms/dev/posts/$1.md"; }
 rp_dev 20260829-110000-bob '@all a late note'
 out=$(b read --new)
 check 'read --new reads a linked room' "$(printf '%s' "$out" | grep -c 'a late note')" '1'
-[ -f "$parent/myapp/.moot/seen/dev/myapp" ] && ok 'and its cursor is in the reading repo' || no 'and its cursor is in the reading repo'
-[ ! -e "$parent/.moot/seen/dev/myapp" ] && ok 'and not in the room holder' || no 'and not in the room holder'
+[ -f "$parent/myApp/.moot/seen/dev/myApp" ] && ok 'and its cursor is in the reading repo' || no 'and its cursor is in the reading repo'
+[ ! -e "$parent/.moot/seen/dev/myApp" ] && ok 'and not in the room holder' || no 'and not in the room holder'
 check "so another repo's --new still shows the post" "$(e read --new | grep -c 'a late note')" '1'
-check 'and a second --new in the first repo shows nothing' "$(b read --new)" 'nothing new for myapp'
+check 'and a second --new in the first repo shows nothing' "$(b read --new)" 'nothing new for myApp'
 
 # A room link whose relative target leads back to itself loops. join says so.
 loop=$(new_host)
