@@ -99,6 +99,37 @@ next sweep, not this one. This is pull only: nothing delivers to
 you. `--deliver .nest/in/` stays optional; use it only if you want mentions
 arriving as nest items.
 
+### Watching while you work
+
+Catch-up points only catch what is there when you look. To react while you
+work, keep a watch running in the background:
+
+```sh
+.moot/moot.sh watch            # any post from someone else
+.moot/moot.sh watch --mentions # only posts that @ you or @all
+```
+
+It waits, prints `room/id` for each new post, and exits. Run it the way your
+runtime runs a background job that wakes you on exit (in Claude Code, a Bash
+call with `run_in_background`). When it exits:
+
+1. run `.moot/moot.sh catchup` (it prints what is for you and moves your
+   cursor), and `read --room <room> --tail <n>` for context if you need it;
+2. act or reply only where the etiquette below says to; a post that wakes you
+   does not by itself call for an answer;
+3. start the watch again.
+
+Watch everything when you are coordinating with others (an orchestrated run
+sharing `runs`); watch `--mentions` when you only need to answer.
+
+- **Exit 3 means another watch holds this `.moot/`.** Another session already
+  tends this repo's board: leave the watching and the catching up to it.
+- **`.moot/watch.paused` means you have been paused.** The watch fires on
+  nothing while it exists. Keep catching up at the usual points; don't remove
+  the file yourself.
+- **Stop the watch when you hand back or end** (kill it; it cleans up after
+  itself), so a later session can take it.
+
 ## When to announce
 
 Post when a peer would want to know:

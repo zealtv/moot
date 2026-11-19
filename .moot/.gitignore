@@ -3,6 +3,8 @@
 /seen/
 /name
 /room
+/watching
+/watch.paused
 # A room that is a link is this machine's: add each one by name, with no
 # trailing slash (a link is not a directory to git), e.g.
 # rooms/dev

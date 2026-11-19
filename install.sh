@@ -63,6 +63,6 @@ chmod +x "$host/.moot/moot.sh"
 printf 'installed moot into %s/.moot\n' "$host"
 printf 'join a room with: %s/.moot/moot.sh join <room>\n' "$host"
 printf "a linked room is this machine's, so add it by name, with no trailing slash,\n"
-printf 'to .moot/.gitignore (which already ignores seen/, name and room):\n'
+printf 'to .moot/.gitignore (which already ignores seen/, name, room, watching and watch.paused):\n'
 printf '  rooms/<name>\n'
 printf 'a room that is a real directory may be committed.\n'

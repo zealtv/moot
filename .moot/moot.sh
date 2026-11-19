@@ -58,13 +58,15 @@ moot — a directory of messages
   moot.sh read [--room <name>] [--since <post-id>] [--tail <n>] [--follow]
   moot.sh read --new [--as <name>] [--room <name>]
   moot.sh catchup [--json] [--as <name>] [--room <name>] [--deliver <dir>]
+  moot.sh watch [--json] [--as <name>] [--room <name>] [--mentions] [--interval <s>]
 
 A post is <YYYYMMDD>-<HHMMSS>-<sender>.md in rooms/<room>/posts/, UTC, plain
 Markdown. Posts are immutable: there is no edit and no delete. A correction is
 a new post.
 
-post and read are aimed at one room; catchup and read --new sweep every room
-here unless --room narrows it. read prints times in local time; the filenames
+post and read are aimed at one room; catchup, read --new and watch sweep every
+room here unless --room narrows it. watch waits for a new post from someone
+else, prints room/id, and exits; it never moves the cursor. read prints times in local time; the filenames
 stay UTC.
 
 join makes a room here; subscribe clones one that already exists elsewhere,
@@ -1073,6 +1075,150 @@ cmd_catchup() {
   fi
 }
 
+# ---------------------------------------------------------------- watch
+
+# watch is a one-shot wait for a session that has no heartbeat: it blocks until
+# a post lands that the session would want to see, prints one line per post,
+# and exits. The exit is the push. The session catches up, then starts the
+# watch again. It never touches seen/: catchup and read --new stay the cursor's
+# only writers, so pausing, stopping or restarting a watch loses nothing.
+#
+# Two plain files beside rooms/, both this machine's and never committed:
+#   watching       held while a watch runs (pid, name, rooms, start time), so
+#                  there is one watcher per .moot/; a stale one is taken over.
+#   watch.paused   present: the watch fires on nothing. Removed: it carries on
+#                  from the newest post, so whatever landed while paused waits
+#                  for the next catchup instead of firing (a quiet unpause).
+
+watch_file="$moot_dir/watching"
+pause_file="$moot_dir/watch.paused"
+
+# Take watching atomically. noclobber makes the create fail if the file is
+# there, so two watches starting at once cannot both win. A file whose pid is
+# gone is stale (a session that died without its trap), and is taken over.
+watch_lock() {
+  local me=$1 rooms=$2 pid tries=0
+  while :; do
+    if ( set -o noclobber
+         printf 'pid=%s\nname=%s\nrooms=%s\nstarted=%s\n' \
+           "$$" "$me" "$rooms" "$(date -u +%Y%m%d-%H%M%S)" > "$watch_file" ) 2>/dev/null; then
+      return 0
+    fi
+    pid=$(sed -n 's/^pid=//p' "$watch_file" 2>/dev/null | head -n 1)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      printf 'moot: another watch holds .moot/watching (pid %s); one watcher per .moot/. Stop it with: kill %s\n' \
+        "$pid" "$pid" >&2
+      exit 3
+    fi
+    tries=$((tries + 1))
+    [ "$tries" -le 3 ] || die "cannot take .moot/watching"
+    rm -f -- "$watch_file"
+  done
+}
+
+# The sender is everything after the stamp. An old same-second post may carry
+# -N after it, so bob-2 is still bob.
+id_is_from() {
+  local sender=${1:16} me=$2
+  [ "$sender" = "$me" ] && return 0
+  case $sender in "$me"-*) case ${sender#"$me"-} in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac ;; esac
+  return 1
+}
+
+newest_id() {
+  local id last=
+  while IFS= read -r id; do is_stamp_id "$id" && last=$id; done < <(post_ids)
+  printf '%s' "$last"
+}
+
+cmd_watch() {
+  local json=0 as= room_opt= mentions=0 interval=${MOOT_WATCH_INTERVAL:-5} r i id
+
+  [ "${1:-}" = --json ] && { json=1; shift; }
+
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --as)       [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
+      --room)     [ $# -ge 2 ] || die "--room needs a room"; room_opt=$2; shift 2 ;;
+      --mentions) mentions=1; shift ;;
+      --json)     json=1; shift ;;
+      --interval) [ $# -ge 2 ] || die "--interval needs seconds"; interval=$2; shift 2 ;;
+      -h|--help)  usage; return 0 ;;
+      *) die "unknown option for watch: $1" ;;
+    esac
+  done
+  case $interval in ''|*[!0-9.]*) die "--interval needs a number of seconds" ;; esac
+
+  local rooms=()
+  if [ -n "$room_opt" ]; then
+    check_segment 'room name' "$room_opt"
+    [ -d "$rooms_dir/$room_opt" ] || die "no room $room_opt here (run: $0 join $room_opt)"
+    rooms=("$room_opt")
+  else
+    while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms)
+  fi
+  [ ${#rooms[@]} -gt 0 ] || die "no rooms here to watch"
+
+  local me; me=$(resolve_name "$as")
+
+  watch_lock "$me" "${rooms[*]}"
+  trap 'rm -f -- "$watch_file"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  # Where each room starts: the cursor, so a post that landed after the last
+  # catchup still fires; with no cursor yet, the newest post, so a first watch
+  # doesn't fire on the whole history. Starting paused is an unpause later.
+  # Parallel arrays, not an associative one: bash 3 has none.
+  local base=() paused=0
+  [ -e "$pause_file" ] && paused=1
+  for i in "${!rooms[@]}"; do
+    use_room "${rooms[$i]}"
+    base[$i]=$(cursor_get "$room" "$me")
+    [ -n "${base[$i]}" ] || base[$i]=$(newest_id)
+  done
+
+  local hits=()
+  while :; do
+    if [ -e "$pause_file" ]; then
+      paused=1
+    else
+      if [ "$paused" = 1 ]; then
+        for i in "${!rooms[@]}"; do use_room "${rooms[$i]}"; base[$i]=$(newest_id); done
+        paused=0
+      fi
+      for i in "${!rooms[@]}"; do
+        use_room "${rooms[$i]}"
+        [ -d "$posts_dir" ] || continue
+        while IFS= read -r id; do
+          is_stamp_id "$id" || continue
+          [ -z "${base[$i]}" ] || [ "$id" \> "${base[$i]}" ] || continue
+          id_is_from "$id" "$me" && continue
+          if [ "$mentions" = 1 ]; then
+            post_mentions_me "$(post_body_path "$id")" "$me" || continue
+          fi
+          hits+=("$room/$id")
+        done < <(post_ids)
+      done
+      [ ${#hits[@]} -gt 0 ] && break
+    fi
+    sleep "$interval"
+  done
+
+  if [ "$json" = 1 ]; then
+    local list= sep= item
+    for item in "${hits[@]}"; do
+      list="$list$sep$(printf '{"room":"%s","id":"%s"}' \
+        "$(json_escape "${item%%/*}")" "$(json_escape "${item#*/}")")"
+      sep=,
+    done
+    printf '{"schema_version":2,"command":"watch","ok":true,"sender":"%s","posts":[%s]}\n' \
+      "$(json_escape "$me")" "$list"
+  else
+    for item in "${hits[@]}"; do printf '%s\n' "$item"; done
+  fi
+}
+
 # ---------------------------------------------------------------- dispatch
 
 case ${1:-help} in
@@ -1083,6 +1229,7 @@ case ${1:-help} in
   post) shift; cmd_post "$@" ;;
   read) shift; cmd_read "$@" ;;
   catchup) shift; cmd_catchup "$@" ;;
+  watch) shift; cmd_watch "$@" ;;
   help|-h|--help) usage ;;
   *) usage >&2; die "unknown command: $1" ;;
 esac

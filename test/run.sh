@@ -1192,5 +1192,89 @@ chmod u+w "$ro/.moot/seen/board" 2>/dev/null
 bare=$(new_host)
 check 'read --new with no rooms says nothing new and succeeds' "$("$bare/.moot/moot.sh" read --new --as bob)" 'nothing new for bob'
 
+# ---------------------------------------------------------------- watch
+
+# Start a watch in the background; wait_watch waits up to ~5s for it to exit
+# and sets rc to its status (or 'running' if it never did).
+start_watch() { MOOT_WATCH_INTERVAL=0.2 "$@" > "$work/watch.out" 2> "$work/watch.err" & watch_pid=$!; sleep 0.6; }
+wait_watch() {
+  local n=0
+  while kill -0 "$watch_pid" 2>/dev/null && [ $n -lt 25 ]; do sleep 0.2; n=$((n + 1)); done
+  if kill -0 "$watch_pid" 2>/dev/null; then
+    rc=running; kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null
+  else
+    wait "$watch_pid"; rc=$?
+  fi
+}
+posts_of() { printf '%s/.moot/rooms/board/posts' "$1"; }
+
+group 'watch'
+room=$(new_room)
+printf 'old\n' > "$(posts_of "$room")/20260829-090000-alice.md"
+start_watch "$room/.moot/moot.sh" watch --as bob
+check 'watch does not fire on history' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+[ -e "$room/.moot/watching" ] && ok 'watch holds .moot/watching' || no 'watch holds .moot/watching'
+check 'watching names the watcher' "$(sed -n 's/^name=//p' "$room/.moot/watching")" 'bob'
+printf 'mine\n' > "$(posts_of "$room")/20260829-091000-bob.md"
+sleep 0.6
+check 'watch ignores my own post' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+printf 'new\n' > "$(posts_of "$room")/20260829-092000-alice.md"
+wait_watch
+check 'watch exits 0 on a new post' "$rc" '0'
+check 'watch prints room/id' "$(cat "$work/watch.out")" 'board/20260829-092000-alice'
+[ ! -e "$room/.moot/watching" ] && ok 'watch releases .moot/watching on exit' || no 'watch releases .moot/watching on exit'
+[ ! -e "$room/.moot/seen/board/bob" ] && ok 'watch never writes the cursor' || no 'watch never writes the cursor'
+
+group 'watch from the cursor'
+room=$(new_room)
+printf 'a\n' > "$(posts_of "$room")/20260829-090000-alice.md"
+"$room/.moot/moot.sh" catchup --as bob >/dev/null
+printf 'b\n' > "$(posts_of "$room")/20260829-093000-alice.md"
+start_watch "$room/.moot/moot.sh" watch --as bob
+wait_watch
+check 'a post since the cursor fires at once' "$rc:$(cat "$work/watch.out")" '0:board/20260829-093000-alice'
+check 'and the cursor stays where catchup put it' "$(cat "$room/.moot/seen/board/bob")" '20260829-090000-alice'
+
+group 'watch --mentions'
+room=$(new_room)
+start_watch "$room/.moot/moot.sh" watch --as bob --mentions --json
+printf 'just news\n' > "$(posts_of "$room")/20260829-090000-alice.md"
+sleep 0.6
+check '--mentions ignores a post without @bob' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+printf '@bob please look\n' > "$(posts_of "$room")/20260829-090100-alice.md"
+wait_watch
+check '--mentions fires on @bob' "$rc" '0'
+check '--json names room and post' "$(cat "$work/watch.out")" \
+  '{"schema_version":2,"command":"watch","ok":true,"sender":"bob","posts":[{"room":"board","id":"20260829-090100-alice"}]}'
+
+group 'watch paused'
+room=$(new_room)
+touch "$room/.moot/watch.paused"
+start_watch "$room/.moot/moot.sh" watch --as bob
+printf 'while paused\n' > "$(posts_of "$room")/20260829-090000-alice.md"
+sleep 0.6
+check 'a paused watch does not fire' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+rm -f "$room/.moot/watch.paused"
+sleep 0.6
+check 'unpause is quiet: what landed while paused does not fire' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+printf 'after\n' > "$(posts_of "$room")/20260829-091000-alice.md"
+wait_watch
+check 'after unpause a new post fires' "$rc:$(cat "$work/watch.out")" '0:board/20260829-091000-alice'
+
+group 'one watcher'
+room=$(new_room)
+start_watch "$room/.moot/moot.sh" watch --as bob
+first=$watch_pid
+MOOT_WATCH_INTERVAL=0.2 "$room/.moot/moot.sh" watch --as bob >/dev/null 2>"$work/err2"; rc=$?
+check 'a second watch is refused with exit 3' "$rc" '3'
+check 'and says who holds it' "$(grep -c "pid $first" "$work/err2")" '1'
+check 'the refusal leaves the first watch its file' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$first"
+kill "$first" 2>/dev/null; wait "$first" 2>/dev/null
+[ ! -e "$room/.moot/watching" ] && ok 'a killed watch releases its file' || no 'a killed watch releases its file'
+printf 'pid=999999\nname=bob\n' > "$room/.moot/watching"
+start_watch "$room/.moot/moot.sh" watch --as bob
+check 'a stale watching file is taken over' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
+kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
