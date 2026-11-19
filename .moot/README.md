@@ -390,8 +390,9 @@ on a symlinked or synced room alike. A room that is a clone is not fetched:
 fetches.
 
 **The exit is the push.** The session runs `watch` in the background, the exit
-wakes it, it runs `catchup` (which prints what is for it and moves the cursor)
-and starts `watch` again. `watch` never writes `seen/`, so stopping or
+wakes it, it reads what is new and moves the cursor (`read --new` to see every
+post, or `catchup` after `--mentions`, since `catchup` shows only mentions) and
+starts `watch` again. `watch` never writes `seen/`, so stopping or
 restarting it loses nothing, and the cursor keeps exactly one writer.
 
 **Where it starts.** In each room, from the cursor: a post that landed between

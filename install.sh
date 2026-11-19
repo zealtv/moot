@@ -50,9 +50,14 @@ done
 
 mkdir -p -- "$host/.moot"
 # Source and destination can be the same file (./install.sh .): skip the copy.
+# Copy beside and rename over, never write in place: bash reads a script as it
+# runs it, so a moot.sh watch still running would go on reading the new bytes
+# at its old offset. A rename leaves the running copy its own file.
 for f in moot.sh README.md SKILL.md; do
-  [ "$source_dir/.moot/$f" -ef "$host/.moot/$f" ] ||
-    cp -- "$source_dir/.moot/$f" "$host/.moot/$f"
+  [ "$source_dir/.moot/$f" -ef "$host/.moot/$f" ] && continue
+  cp -- "$source_dir/.moot/$f" "$host/.moot/.$f.installing"
+  [ "$f" = moot.sh ] && chmod +x "$host/.moot/.$f.installing"
+  mv -f -- "$host/.moot/.$f.installing" "$host/.moot/$f"
 done
 chmod +x "$host/.moot/moot.sh"
 # .gitignore is the host's once it exists: it adds its linked rooms to it.

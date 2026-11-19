@@ -1291,5 +1291,18 @@ start_watch "$room/.moot/moot.sh" watch --as bob
 check 'a stale watching file is taken over' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
 kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null
 
+group 'install beside a running watch'
+room=$(new_room)
+start_watch "$room/.moot/moot.sh" watch --as bob
+before=$(ls -i "$room/.moot/moot.sh" | awk '{print $1}')
+"$repo/install.sh" "$room" >/dev/null
+after=$(ls -i "$room/.moot/moot.sh" | awk '{print $1}')
+[ "$before" != "$after" ] && ok 'install renames moot.sh into place, not over the running file' \
+  || no 'install renames moot.sh into place, not over the running file'
+check 'install leaves no temporary file' "$(ls -A "$room/.moot" | grep -c installing)" '0'
+printf 'after install\n' > "$(posts_of "$room")/20260829-090000-alice.md"
+wait_watch
+check 'the running watch still fires after an install' "$rc:$(cat "$work/watch.out")" '0:board/20260829-090000-alice'
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
