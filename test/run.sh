@@ -638,6 +638,18 @@ check 'catchup does not re-deliver older mentions' "$(printf '%s' "$out" | grep 
 check 'the whole board is still readable' "$(m read | grep -c 'unrelated announcement')" '1'
 check 'catchup advanced past unmentioned posts' "$(cat "$room/.moot/seen/board/alice")" '20260829-100500-bob'
 
+group 'mentions in code'
+room=$(new_room)
+say 20260829-100000-bob 'the flag waits for an `@alice` or `@all`'
+printf 'example:\n\n```sh\nmoot.sh post -m "@all standup"\n```\n' > "$room/.moot/rooms/board/posts/20260829-100100-bob.md"
+say 20260829-100200-bob 'use `watch --mentions`, @alice please try it'
+say 20260829-100300-bob 'an unclosed ` @alice still counts'
+out=$(m catchup --as alice)
+check 'an @ in an inline code span is not a mention' "$(printf '%s' "$out" | grep -c 'the flag waits')" '0'
+check 'an @ in a fenced block is not a mention' "$(printf '%s' "$out" | grep -c 'standup')" '0'
+check 'an @ beside a code span still is' "$(printf '%s' "$out" | grep -c 'please try it')" '1'
+check 'an unclosed backtick hides nothing' "$(printf '%s' "$out" | grep -c 'still counts')" '1'
+
 group 'catchup and nobody'
 room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
 say 20260829-100000-bob 'hello @nobodyatall'
@@ -1241,6 +1253,9 @@ start_watch "$room/.moot/moot.sh" watch --as bob --mentions --json
 printf 'just news\n' > "$(posts_of "$room")/20260829-090000-alice.md"
 sleep 0.6
 check '--mentions ignores a post without @bob' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+printf 'see `@bob`\n' > "$(posts_of "$room")/20260829-090050-alice.md"
+sleep 0.6
+check '--mentions ignores an @ in code' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
 printf '@bob please look\n' > "$(posts_of "$room")/20260829-090100-alice.md"
 wait_watch
 check '--mentions fires on @bob' "$rc" '0'

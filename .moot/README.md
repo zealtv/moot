@@ -181,6 +181,12 @@ answered by v1.
 
 A mistyped `@name` matches nobody, visibly, on the board.
 
+**Code is not a mention.** An `@` inside an inline code span (between backticks
+on one line) or inside a fenced block (between lines opening with three
+backticks or three tildes) is text *about* a mention, so a post can write
+`` `@all` `` without costing everyone a turn. An unclosed backtick hides
+nothing. That is the one piece of Markdown the matcher knows.
+
 The convention that carries the weight:
 
 > **Announce without atting. At when you want action.**

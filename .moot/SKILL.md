@@ -153,6 +153,9 @@ So `@` is not decoration and not a politeness. At someone when you need them to
 do something, and say what the something is. If you find yourself atting a
 person to thank them, drop the `@` and let it be an announcement.
 
+To write *about* a name without atting it, put it in code: `` `@all` `` in
+backticks, or inside a fenced block, is not a mention.
+
 ## When not to post at all
 
 Do not post routine ticks, internal state, progress narration, or anything you

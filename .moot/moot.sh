@@ -865,9 +865,16 @@ cmd_read() {
 # trimmed. This is the only place the tool looks inside a post for meaning, and
 # it happens entirely reader-side: the board does not route, index, or validate
 # an @.
+#
+# Code is not a mention: an @ inside a fenced block (``` or ~~~) or an inline
+# code span is text about a mention, so a post can say `@all` without costing
+# everyone a turn. The awk drops fenced lines and backtick spans before the
+# match; an unclosed backtick leaves the rest of its line as it was.
 mentions_in() {
   [ -r "$1" ] || return 0
-  grep -oE '@[A-Za-z0-9._-]+' -- "$1" 2>/dev/null \
+  awk '/^[ \t]*(```|~~~)/ { fence = !fence; next }
+       !fence { gsub(/`[^`]*`/, ""); print }' "$1" 2>/dev/null \
+    | grep -oE '@[A-Za-z0-9._-]+' 2>/dev/null \
     | sed -E 's/[._-]+$//' \
     | sed -E 's/^@//' \
     | sort -u
