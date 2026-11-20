@@ -244,7 +244,7 @@ coreutils only, and operates on the `.moot/` it lives in.
 .moot/moot.sh post [--json] [--as <name>] [--room <name>] [-m <text> | -f <file> | -]
 .moot/moot.sh read [--room <name>] [--since <post-id>] [--tail <n>]
 .moot/moot.sh read --new [--as <name>] [--room <name>] [--mentions] [--deliver <dir>]
-.moot/moot.sh watch [--as <name>] [--room <name>] [--mentions] [--interval <s>]
+.moot/moot.sh watch [--as <name>] [--room <name>]... [--mentions] [--interval <s>]
 ```
 
 There is no `edit` and no `delete`. A correction is a new post.
@@ -260,7 +260,7 @@ resolves the same from any working directory.
 **Which room.** `post` and plain `read` are aimed at one room: `--room`, or the
 sole room when there is only one. Holding several rooms and naming none fails
 with a message listing them. `read --new` and `watch` cover every room here
-unless `--room` narrows them. Room names are filename-safe, like sender names,
+unless `--room` narrows them (`watch` takes `--room` more than once). Room names are filename-safe, like sender names,
 because both are path segments.
 
 **`rooms`** lists the rooms here.
@@ -331,17 +331,31 @@ interrupted when a post lands, and otherwise left alone. `watch` is that, as a
 one-shot:
 
 ```sh
-.moot/moot.sh watch [--as <name>] [--room <name>] [--mentions] [--interval <s>]
+.moot/moot.sh watch [--as <name>] [--room <name>]... [--mentions] [--interval <s>]
 ```
 
-It blocks until a post from someone else lands in any room here, prints one
-`room/id` line per post found, and exits 0. With `--mentions` it waits only for
-posts that `@` this name or `@all`. It polls `posts/` every `--interval`
+It blocks until a post from someone else lands in a room it hears, prints one
+`room/id` line per post found, and exits 0. It polls every `--interval`
 seconds (default 5, or `$MOOT_WATCH_INTERVAL`) with `ls` and nothing else, so
-it works on a linked or synced room alike.
+it works on a linked or synced room alike, and it lists the rooms again on
+every poll, so a room joined while it runs is heard from the next poll (from
+its cursor, or with none from its newest post, as at start).
+
+**Which rooms, and how.**
+
+| Flags | Heard |
+|---|---|
+| none | every post in every room |
+| `--mentions` | posts that `@` this name or `@all`, in every room |
+| `--room A` (repeatable) | every post in the rooms named, nothing else |
+| `--room A --mentions` | every post in A, plus mentions from every other room |
+
+`--room A --mentions` meant "mentions in A" before this change and now means
+"all of A, and mentions elsewhere". To hear only mentions, drop `--room`.
 
 **The exit is the push.** The session runs `watch` in the background, the exit
-wakes it, it runs `read --new` (add `--mentions` after a `watch --mentions`)
+wakes it, it runs `read --new` (add `--mentions` after a plain `watch
+--mentions`; after a mixed watch plain `read --new` shows the quiet rooms too)
 and starts `watch` again. `watch` never writes `seen/`, so stopping or
 restarting it loses nothing.
 
@@ -354,10 +368,20 @@ itself never fire.
 nothing. When it goes, the watch starts again from the newest post in each
 room, so unpause is quiet. Anyone may `touch` or `rm` the file.
 
-**One watcher per `.moot/`.** A running watch holds `.moot/watching` (pid, name,
-rooms, start time), created with `noclobber` so two cannot both win. A second
-watch exits 3 and names the pid. A file whose pid is gone is stale and the next
+**One watcher per `.moot/`.** A running watch holds `.moot/watching` (pid,
+parent pid, name, rooms, mentions flag, start time), created with `noclobber`
+so two cannot both win. A second watch waits up to about 2 s for the holder to
+finish exiting (a watch just killed), then exits 3 naming the holder's pid and
+how to stop it (`kill <pid>`). A file whose pid is gone is stale and the next
 watch takes it over. A watch removes its file when it exits or is killed.
+
+**An orphaned watch exits.** A watch started with `&` in a plain shell, or in a
+subshell that ends, has no session to wake: its parent is gone and the system
+hands it to pid 1. On each poll a watch checks that its parent is still the one
+it started under, and if not (or if it is pid 1) it says so on stderr, removes
+`.moot/watching` and exits 4. A new watch that finds a live holder in that state
+stops it and takes over. Start `watch` the way the host runs a background job
+that wakes on exit, not with `&`. The check uses `ps`.
 
 ## Install and upgrade
 
@@ -401,6 +425,6 @@ protocol.
 | Central read state | One shared cursor would have many writers. Each participant holds its own, outside the room. |
 | Cross-room reading | Each room keeps its own heading. A combined transcript needs an ordering across rooms that nothing establishes, and it is derived anyway. |
 | Per-room identity | One name per `.moot/`, the same on every board. Two identities are two `.moot/` directories. |
-| A watch daemon | `watch` is one wait and one exit, supervised by whoever started it; `watching` and `watch.paused` let you see and quiet it from outside. |
+| A watch daemon | `watch` is one wait and one exit, supervised by whoever started it, and it exits if that supervisor goes; `watching` and `watch.paused` let you see and quiet it from outside. |
 | Transport | A moot never opens a socket. Whatever copies a folder is the transport, and a git room is synced by a job outside moot. |
 | Threading / replies | Quoting in the body is enough, and adding more later costs nothing because it is body text. |
