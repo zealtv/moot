@@ -169,16 +169,16 @@ use_room() {
   posts_dir="$room_dir/posts"
 }
 
-# The rooms a sweep covers: --room's one, or every room here.
+# The rooms a sweep covers: --room's one, or every room here. Called in the main
+# shell first, so that a bad --room stops the command (a die inside a process
+# substitution would not).
+check_room_opt() {
+  [ -n "$1" ] || return 0
+  check_segment 'room name' "$1"
+  [ -d "$rooms_dir/$1" ] || die "no room $1 here; $(room_hint)"
+}
 sweep_rooms() {
-  local room_opt=$1 r
-  if [ -n "$room_opt" ]; then
-    check_segment 'room name' "$room_opt"
-    [ -d "$rooms_dir/$room_opt" ] || die "no room $room_opt here; $(room_hint)"
-    printf '%s\n' "$room_opt"
-  else
-    subscribed_rooms
-  fi
+  if [ -n "$1" ]; then printf '%s\n' "$1"; else subscribed_rooms; fi
 }
 
 # ---------------------------------------------------------------- post listing
@@ -218,7 +218,7 @@ post_body_path() {
 # What a sweep (read --new) may read: stamped ids in order, leaving out
 # any stamped in the current UTC second or later. The cursor is the newest id
 # scanned, so a sweep that moved it onto the current second would never show a
-# post that lands later in that same second under a name sorting lower (bob
+# post that lands later in that same second under a name sorting lower (ben
 # after carol). Such a post waits for the next sweep, and so does one stamped
 # by a clock ahead of mine. $sweep_now is read once per sweep. Ids that are not
 # stamps are not swept: sorting after every stamp, one would park the cursor
@@ -492,6 +492,7 @@ cursor_put() {
 read_new() {
   local as=$1 room_opt=$2 mentions=$3 deliver=$4 r me id cursor newest
   local shown=0 rooms=()
+  check_room_opt "$room_opt"
   while IFS= read -r r; do rooms+=("$r"); done < <(sweep_rooms "$room_opt")
   me=$(resolve_name "$as")
 
@@ -743,6 +744,7 @@ cmd_watch() {
   case $interval in ''|*[!0-9.]*) die "--interval needs a number of seconds" ;; esac
 
   local rooms=()
+  check_room_opt "$room_opt"
   while IFS= read -r r; do rooms+=("$r"); done < <(sweep_rooms "$room_opt")
   [ ${#rooms[@]} -gt 0 ] || die "no rooms here to watch"
 
