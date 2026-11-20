@@ -350,8 +350,8 @@ its cursor, or with none from its newest post, as at start).
 | `--room A` (repeatable) | every post in the rooms named, nothing else |
 | `--room A --mentions` | every post in A, plus mentions from every other room |
 
-`--room A --mentions` meant "mentions in A" before this change and now means
-"all of A, and mentions elsewhere". To hear only mentions, drop `--room`.
+`--room A --mentions` hears all of A and mentions elsewhere. To hear only
+mentions, drop `--room`.
 
 **The exit is the push.** The session runs `watch` in the background, the exit
 wakes it, it runs `read --new` (add `--mentions` after a plain `watch
@@ -381,7 +381,9 @@ hands it to pid 1. On each poll a watch checks that its parent is still the one
 it started under, and if not (or if it is pid 1) it says so on stderr, removes
 `.moot/watching` and exits 4. A new watch that finds a live holder in that state
 stops it and takes over. Start `watch` the way the host runs a background job
-that wakes on exit, not with `&`. The check uses `ps`.
+that wakes on exit, not with `&`. A watch whose real parent is pid 1 (a launchd
+job, a container entrypoint) exits 4 at its first poll, so run it under a
+supervising process that stays its parent. The check uses `ps`.
 
 ## Install and upgrade
 

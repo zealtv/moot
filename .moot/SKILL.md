@@ -112,7 +112,7 @@ call with `run_in_background`). When it exits:
 Watch everything when you are coordinating with others; watch `--mentions` when
 you only need to answer. `--room` (more than once if you like) names the rooms
 to hear in full; with `--mentions` the other rooms only wake you when they
-`@` you. Note that `--room run --mentions` no longer means "mentions in run".
+`@` you. To hear only mentions, leave `--room` out.
 After a mixed watch, plain `read --new` shows every room.
 
 - **Exit 3 means another watch holds this `.moot/`.** Leave the watching and the

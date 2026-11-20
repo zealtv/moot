@@ -712,7 +712,9 @@ ppid_of() {
 is_this_watch() {
   local cmd w this=0 watch=0 physical
   command -v ps >/dev/null 2>&1 || return 0
-  cmd=$(ps -o command= -p "$1" 2>/dev/null) || return 1
+  # kill -0 has shown the pid is alive: if ps cannot say more, take it as live.
+  cmd=$(ps -o command= -p "$1" 2>/dev/null) || return 0
+  [ -n "$cmd" ] || return 0
   physical=$(cd -P -- "$moot_dir" && pwd)
   local words
   read -r -a words <<< "$cmd"
@@ -809,7 +811,8 @@ cmd_watch() {
   local watch_parent=$PPID
   seen_opt=${seen_opt# }
   watch_lock "$me" "${seen_opt:-all}" "$mentions"
-  trap 'rm -f -- "$watch_file"' EXIT
+  sleep_pid=
+  trap '[ -z "$sleep_pid" ] || kill "$sleep_pid" 2>/dev/null || true; rm -f -- "$watch_file"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
 
@@ -871,7 +874,10 @@ cmd_watch() {
       done
       [ ${#hits[@]} -gt 0 ] && break
     fi
-    sleep "$interval"
+    # Sleep in the background and wait on it, so a TERM or INT runs its trap at
+    # once instead of when a foreground sleep ends.
+    sleep "$interval" & sleep_pid=$!
+    wait "$sleep_pid" || true
   done
 
   for item in "${hits[@]}"; do printf '%s\n' "$item"; done

@@ -1203,6 +1203,41 @@ check 'a live unrelated pid in watching is taken over' "$(sed -n 's/^pid=//p' "$
 kill -0 "$unrelated" 2>/dev/null && ok 'and the unrelated process is not signalled' || no 'and the unrelated process is not signalled'
 kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null; kill "$unrelated" 2>/dev/null
 
+group 'a watch killed at a realistic interval'
+room=$(new_room)
+start_watch "$room/.moot/moot.sh" watch --as ben --interval 3
+first=$watch_pid
+kill "$first" 2>/dev/null
+start_watch "$room/.moot/moot.sh" watch --as ben --interval 3
+check 'a restart at once takes the file from a watch killed mid-sleep' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
+check 'and the killed watch is gone' "$(kill -0 "$first" 2>/dev/null && echo alive)" ''
+kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null; wait "$first" 2>/dev/null
+
+group 'the orphan exit status'
+room=$(new_room)
+# A stand-in ps that reports another parent for every ppid query, as if the
+# real parent had gone, so the watch can stay our child and be waited on.
+mkdir -p "$work/psbin"
+realps=$(command -v ps)
+printf '#!/bin/sh\ncase "$*" in *ppid*) echo 4242 ;; *) exec %s "$@" ;; esac\n' "$realps" > "$work/psbin/ps"
+chmod +x "$work/psbin/ps"
+PATH="$work/psbin:$PATH" start_watch "$room/.moot/moot.sh" watch --as ben
+wait_watch
+check 'a watch that lost its parent exits 4' "$rc" '4'
+[ ! -e "$room/.moot/watching" ] && ok 'and releases .moot/watching' || no 'and releases .moot/watching'
+
+group 'a room removed while watching'
+room=$(new_room); keep "$room" other
+printf 'old\n' > "$(posts_of "$room")/20260829-090000-alice.md"
+printf 'old\n' > "$room/.moot/rooms/other/posts/20260829-090000-alice.md"
+start_watch "$room/.moot/moot.sh" watch --as ben
+rm -rf "${room:?}/.moot/rooms/other"
+sleep 0.6
+check 'the watch carries on' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+printf 'new\n' > "$(posts_of "$room")/20260829-091000-alice.md"
+wait_watch
+check 'and still hears the other room' "$rc:$(cat "$work/watch.out")" '0:board/20260829-091000-alice'
+
 group 'a room joined while watching'
 room=$(new_room)
 printf 'old\n' > "$(posts_of "$room")/20260829-090000-alice.md"
