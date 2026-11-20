@@ -1160,6 +1160,94 @@ start_watch "$room/.moot/moot.sh" watch --as ben
 check 'a stale watching file is taken over' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
 kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null
 
+group 'a watch just killed does not block its restart'
+room=$(new_room)
+start_watch "$room/.moot/moot.sh" watch --as ben
+first=$watch_pid
+kill "$first" 2>/dev/null
+start_watch "$room/.moot/moot.sh" watch --as ben
+check 'the restart waits for the dying holder, then takes the file' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
+check 'and is still running' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null; wait "$first" 2>/dev/null
+
+group 'an orphaned watch'
+room=$(new_room)
+# Started in a subshell that exits at once, so the watch is left with no parent.
+( MOOT_WATCH_INTERVAL=0.2 "$room/.moot/moot.sh" watch --as ben >/dev/null 2>"$work/orphan.err" & )
+sleep 0.2
+n=0; while [ -e "$room/.moot/watching" ] && [ $n -lt 25 ]; do sleep 0.2; n=$((n + 1)); done
+[ ! -e "$room/.moot/watching" ] && ok 'an orphaned watch exits and releases .moot/watching' || no 'an orphaned watch exits and releases .moot/watching'
+check 'and says why' "$(grep -c 'parent' "$work/orphan.err")" '1'
+
+group 'a holder that is orphaned or stale'
+room=$(new_room)
+printf 'pid=999999\nparent=1\nname=ben\n' > "$room/.moot/watching"
+start_watch "$room/.moot/moot.sh" watch --as ben
+check 'a holder whose pid is gone is taken over' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
+kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null
+# A live process that recorded a different parent than it has now: an orphan.
+sleep 30 & holder=$!
+printf 'pid=%s\nparent=999999\nname=ben\n' "$holder" > "$room/.moot/watching"
+start_watch "$room/.moot/moot.sh" watch --as ben
+check 'a live holder that lost its parent is taken over' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
+kill -0 "$holder" 2>/dev/null && no 'and is asked to stop' || ok 'and is asked to stop'
+kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null; wait "$holder" 2>/dev/null
+
+group 'a room joined while watching'
+room=$(new_room)
+printf 'old\n' > "$(posts_of "$room")/20260829-090000-alice.md"
+start_watch "$room/.moot/moot.sh" watch --as ben
+keeper=$(new_host); keep "$keeper" ops
+printf 'old\n' > "$keeper/.moot/rooms/ops/posts/20260829-090000-carol.md"
+"$room/.moot/moot.sh" join "$keeper/.moot/rooms/ops" >/dev/null
+sleep 0.6
+check 'joining a room fires nothing on its history' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+printf 'new\n' > "$keeper/.moot/rooms/ops/posts/20260829-091000-carol.md"
+wait_watch
+check 'a new post in the joined room fires' "$rc:$(cat "$work/watch.out")" '0:ops/20260829-091000-carol'
+
+group 'watch --room (repeatable) and mixed mode'
+room=$(new_room); keep "$room" run; keep "$room" runs; keep "$room" other
+p() { printf '%s\n' "$3" > "$room/.moot/rooms/$1/posts/$2.md"; }
+for r in board run runs other; do p "$r" 20260829-090000-alice 'old'; done
+start_watch "$room/.moot/moot.sh" watch --as ben --room run --room board
+p other 20260829-091000-alice 'hello @ben'
+sleep 0.6
+check '--room alone ignores other rooms, mentions or not' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+p board 20260829-091100-alice 'plain'
+wait_watch
+check 'each --room is heard fully' "$rc:$(cat "$work/watch.out")" '0:board/20260829-091100-alice'
+
+room=$(new_room); keep "$room" run
+p() { printf '%s\n' "$3" > "$room/.moot/rooms/$1/posts/$2.md"; }
+for r in board run; do p "$r" 20260829-090000-alice 'old'; done
+start_watch "$room/.moot/moot.sh" watch --as ben --room run --mentions
+check 'watching names the full rooms and the mentions flag' "$(grep -c '^rooms=run$' "$room/.moot/watching"):$(grep -c '^mentions=1$' "$room/.moot/watching")" '1:1'
+p board 20260829-091000-alice 'unmentioned elsewhere'
+sleep 0.6
+check 'an unmentioned post in another room does not fire' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+p board 20260829-091100-alice 'in code `@ben` only'
+sleep 0.6
+check 'an @ in code elsewhere does not fire' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+p board 20260829-091200-alice 'hey @ben'
+wait_watch
+check 'a mention in another room fires' "$rc:$(cat "$work/watch.out")" '0:board/20260829-091200-alice'
+
+start_watch "$room/.moot/moot.sh" watch --as ben --room run --mentions
+p run 20260829-092000-alice 'no mention needed here'
+wait_watch
+check 'a post in the full room fires with no mention' "$rc:$(cat "$work/watch.out")" '0:run/20260829-092000-alice'
+
+start_watch "$room/.moot/moot.sh" watch --as ben --mentions
+p run 20260829-093000-alice 'plain'
+sleep 0.6
+check 'with no --room, --mentions still means mentions everywhere' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+p run 20260829-093100-alice '@ben'
+wait_watch
+check 'and fires on one' "$rc:$(cat "$work/watch.out")" '0:run/20260829-093100-alice'
+
+"$room/.moot/moot.sh" watch --as ben --room nosuch >/dev/null 2>&1 && no 'a --room that is not here is refused' || ok 'a --room that is not here is refused'
+
 group 'install beside a running watch'
 room=$(new_room)
 start_watch "$room/.moot/moot.sh" watch --as ben

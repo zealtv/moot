@@ -49,7 +49,7 @@ moot — a directory of messages
   moot.sh post [--json] [--as <name>] [--room <name>] [-m <text> | -f <file> | -]
   moot.sh read [--room <name>] [--since <post-id>] [--tail <n>]
   moot.sh read --new [--as <name>] [--room <name>] [--mentions] [--deliver <dir>]
-  moot.sh watch [--as <name>] [--room <name>] [--mentions] [--interval <s>]
+  moot.sh watch [--as <name>] [--room <name>]... [--mentions] [--interval <s>]
 
 A post is <YYYYMMDD>-<HHMMSS>-<sender>.md in rooms/<room>/posts/, UTC, plain
 Markdown. Posts are immutable: there is no edit and no delete. A correction is
@@ -63,7 +63,8 @@ post and read are aimed at one room; read --new and watch cover every room here
 unless --room narrows them. read --new prints every post since my cursor (only
 the ones that mention me with --mentions, or written to <dir> with --deliver)
 and moves the cursor. watch waits for a new post from someone else, prints
-room/id, and exits; it never moves the cursor. read prints times in local time;
+room/id, and exits; it never moves the cursor. watch --room (repeatable) hears
+those rooms fully; with --mentions it also hears mentions in the others. read prints times in local time;
 the filenames stay UTC.
 USAGE
 }
@@ -696,22 +697,45 @@ deliver_post() {
 watch_file="$moot_dir/watching"
 pause_file="$moot_dir/watch.paused"
 
+# The pid of a process's parent, or nothing if it is gone or ps cannot say.
+ppid_of() {
+  local p
+  p=$(ps -o ppid= -p "$1" 2>/dev/null) || return 0
+  printf '%s' "${p//[[:space:]]/}"
+}
+
 # Take watching atomically. noclobber makes the create fail if the file is
 # there, so two watches starting at once cannot both win. A file whose pid is
-# gone is stale (a session that died without its trap), and is taken over.
+# gone is stale (a session that died without its trap), and is taken over. A
+# holder that is alive gets up to about 2 s to finish exiting before this watch
+# gives up with exit 3, so a watch just killed does not block its restart. A
+# holder whose parent is pid 1, or has changed since it started, is an orphan:
+# it would exit at its next poll anyway, so it is asked to now.
 watch_lock() {
-  local me=$1 rooms=$2 pid tries=0
+  local me=$1 rooms=$2 mentions=$3 pid parent now tries=0 waited=0
   while :; do
     if ( set -o noclobber
-         printf 'pid=%s\nname=%s\nrooms=%s\nstarted=%s\n' \
-           "$$" "$me" "$rooms" "$(date -u +%Y%m%d-%H%M%S)" > "$watch_file" ) 2>/dev/null; then
+         printf 'pid=%s\nparent=%s\nname=%s\nrooms=%s\nmentions=%s\nstarted=%s\n' \
+           "$$" "$PPID" "$me" "$rooms" "$mentions" "$(date -u +%Y%m%d-%H%M%S)" > "$watch_file" ) 2>/dev/null; then
       return 0
     fi
     pid=$(sed -n 's/^pid=//p' "$watch_file" 2>/dev/null | head -n 1)
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      printf 'moot: another watch holds .moot/watching (pid %s); one watcher per .moot/. Stop it with: kill %s\n' \
-        "$pid" "$pid" >&2
-      exit 3
+      if [ "$waited" -eq 0 ]; then
+        parent=$(sed -n 's/^parent=//p' "$watch_file" 2>/dev/null | head -n 1)
+        now=$(ppid_of "$pid")
+        if [ -n "$now" ] && { [ "$now" = 1 ] || { [ -n "$parent" ] && [ "$now" != "$parent" ]; }; }; then
+          kill "$pid" 2>/dev/null || true
+        fi
+      fi
+      if [ "$waited" -ge 10 ]; then
+        printf 'moot: another watch holds .moot/watching (pid %s); one watcher per .moot/. Stop it with: kill %s\n' \
+          "$pid" "$pid" >&2
+        exit 3
+      fi
+      waited=$((waited + 1))
+      sleep 0.2
+      continue
     fi
     tries=$((tries + 1))
     [ "$tries" -le 3 ] || die "cannot take .moot/watching"
@@ -729,12 +753,13 @@ newest_id() {
 }
 
 cmd_watch() {
-  local as= room_opt= mentions=0 interval=${MOOT_WATCH_INTERVAL:-5} r i id item
+  local as= mentions=0 interval=${MOOT_WATCH_INTERVAL:-5} r i id item
+  local full=()
 
   while [ $# -gt 0 ]; do
     case $1 in
       --as)       [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
-      --room)     [ $# -ge 2 ] || die "--room needs a room"; room_opt=$2; shift 2 ;;
+      --room)     [ $# -ge 2 ] || die "--room needs a room"; full+=("$2"); shift 2 ;;
       --mentions) mentions=1; shift ;;
       --interval) [ $# -ge 2 ] || die "--interval needs seconds"; interval=$2; shift 2 ;;
       -h|--help)  usage; return 0 ;;
@@ -743,47 +768,78 @@ cmd_watch() {
   done
   case $interval in ''|*[!0-9.]*) die "--interval needs a number of seconds" ;; esac
 
-  local rooms=()
-  check_room_opt "$room_opt"
-  while IFS= read -r r; do rooms+=("$r"); done < <(sweep_rooms "$room_opt")
-  [ ${#rooms[@]} -gt 0 ] || die "no rooms here to watch"
+  # Which rooms are heard how. With no --room, every room, and --mentions
+  # narrows all of them to mentions. With --room, those rooms fully, and
+  # --mentions adds mentions from every other room; without it the others are
+  # not heard. The room list is read again on every poll, so a room joined
+  # while the watch runs is heard from its next poll.
+  local seen_opt=
+  for r in ${full[@]+"${full[@]}"}; do
+    check_room_opt "$r"
+    case " $seen_opt " in *" $r "*) ;; *) seen_opt="$seen_opt $r" ;; esac
+  done
+  [ -n "$(subscribed_rooms)" ] || die "no rooms here to watch"
 
   local me; me=$(resolve_name "$as")
 
-  watch_lock "$me" "${rooms[*]}"
+  local watch_parent=$PPID
+  seen_opt=${seen_opt# }
+  watch_lock "$me" "${seen_opt:-all}" "$mentions"
   trap 'rm -f -- "$watch_file"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
 
   # Where each room starts: the cursor, so a post that landed after the last
   # read --new still fires; with no cursor yet, the newest post, so a first watch
-  # doesn't fire on the whole history. Starting paused is an unpause later.
+  # doesn't fire on the whole history. A room that appears later starts the same
+  # way. Starting paused is an unpause later.
   # Parallel arrays, not an associative one: bash 3 has none.
-  local base=() paused=0
+  local known=() base=() k idx only paused=0 now
   [ -e "$pause_file" ] && paused=1
-  for i in "${!rooms[@]}"; do
-    use_room "${rooms[$i]}"
-    base[$i]=$(cursor_get "$room" "$me")
-    [ -n "${base[$i]}" ] || base[$i]=$(newest_id)
-  done
 
   local hits=()
   while :; do
+    # An orphan (its parent gone or now pid 1, so it can never wake a session)
+    # exits and lets go of watching.
+    now=$(ppid_of "$$")
+    if [ -n "$now" ] && { [ "$now" = 1 ] || [ "$now" != "$watch_parent" ]; }; then
+      printf 'moot: watch exiting: its parent (pid %s) is gone, so nothing would hear it\n' "$watch_parent" >&2
+      exit 4
+    fi
+    # List the rooms afresh and start any new one.
+    while IFS= read -r r; do
+      idx=
+      for k in "${!known[@]}"; do [ "${known[$k]}" = "$r" ] && idx=$k; done
+      [ -z "$idx" ] || continue
+      use_room "$r"
+      idx=${#known[@]}
+      known[$idx]=$r
+      base[$idx]=$(cursor_get "$room" "$me")
+      [ -n "${base[$idx]}" ] || base[$idx]=$(newest_id)
+    done < <(subscribed_rooms)
     if [ -e "$pause_file" ]; then
       paused=1
     else
       if [ "$paused" = 1 ]; then
-        for i in "${!rooms[@]}"; do use_room "${rooms[$i]}"; base[$i]=$(newest_id); done
+        for i in "${!known[@]}"; do use_room "${known[$i]}"; base[$i]=$(newest_id); done
         paused=0
       fi
-      for i in "${!rooms[@]}"; do
-        use_room "${rooms[$i]}"
+      for i in "${!known[@]}"; do
+        r=${known[$i]}
+        # Heard fully, heard on mentions only, or not heard.
+        only=
+        if [ -n "$seen_opt" ]; then
+          case " $seen_opt " in *" $r "*) ;; *) [ "$mentions" = 1 ] || continue; only=1 ;; esac
+        elif [ "$mentions" = 1 ]; then
+          only=1
+        fi
+        use_room "$r"
         [ -d "$posts_dir" ] || continue
         while IFS= read -r id; do
           is_stamp_id "$id" || continue
           [ -z "${base[$i]}" ] || [ "$id" \> "${base[$i]}" ] || continue
           id_is_from "$id" "$me" && continue
-          if [ "$mentions" = 1 ]; then
+          if [ -n "$only" ]; then
             post_mentions_me "$(post_body_path "$id")" "$me" || continue
           fi
           hits+=("$room/$id")
