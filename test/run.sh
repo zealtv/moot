@@ -1185,13 +1185,23 @@ printf 'pid=999999\nparent=1\nname=ben\n' > "$room/.moot/watching"
 start_watch "$room/.moot/moot.sh" watch --as ben
 check 'a holder whose pid is gone is taken over' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
 kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null
-# A live process that recorded a different parent than it has now: an orphan.
-sleep 30 & holder=$!
-printf 'pid=%s\nparent=999999\nname=ben\n' "$holder" > "$room/.moot/watching"
+# A live watch that recorded a different parent than it has now: an orphan.
 start_watch "$room/.moot/moot.sh" watch --as ben
-check 'a live holder that lost its parent is taken over' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
+holder=$watch_pid
+sed -i.bak 's/^parent=.*/parent=999999/' "$room/.moot/watching"; rm -f "$room/.moot/watching.bak"
+start_watch "$room/.moot/moot.sh" watch --as ben
+check 'a live watch that lost its parent is taken over' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
+n=0; while kill -0 "$holder" 2>/dev/null && [ $n -lt 15 ]; do sleep 0.2; n=$((n + 1)); done
 kill -0 "$holder" 2>/dev/null && no 'and is asked to stop' || ok 'and is asked to stop'
 kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null; wait "$holder" 2>/dev/null
+# A recycled pid: a live, unrelated process whose parent is pid 1 (detached).
+( sleep 30 >/dev/null 2>&1 & echo $! > "$work/unrelated.pid" )
+unrelated=$(cat "$work/unrelated.pid")
+printf 'pid=%s\nparent=1\nname=ben\n' "$unrelated" > "$room/.moot/watching"
+start_watch "$room/.moot/moot.sh" watch --as ben
+check 'a live unrelated pid in watching is taken over' "$(sed -n 's/^pid=//p' "$room/.moot/watching")" "$watch_pid"
+kill -0 "$unrelated" 2>/dev/null && ok 'and the unrelated process is not signalled' || no 'and the unrelated process is not signalled'
+kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null; kill "$unrelated" 2>/dev/null
 
 group 'a room joined while watching'
 room=$(new_room)

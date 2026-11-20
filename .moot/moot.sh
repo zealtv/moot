@@ -704,9 +704,33 @@ ppid_of() {
   printf '%s' "${p//[[:space:]]/}"
 }
 
+# Is this pid a moot watch for this .moot/? A pid in watching may have been
+# recycled by an unrelated process, which must never be waited on or signalled.
+# Its command line has to name a moot.sh (this one's path, in either its
+# logical or physical form, or a relative one) and the word watch. Without ps
+# there is no way to tell, so the holder is taken at its word.
+is_this_watch() {
+  local cmd w this=0 watch=0 physical
+  command -v ps >/dev/null 2>&1 || return 0
+  cmd=$(ps -o command= -p "$1" 2>/dev/null) || return 1
+  physical=$(cd -P -- "$moot_dir" && pwd)
+  local words
+  read -r -a words <<< "$cmd"
+  for w in ${words[@]+"${words[@]}"}; do
+    case $w in
+      "$moot_dir/moot.sh" | "$physical/moot.sh") this=1 ;;
+      /*) ;;
+      moot.sh | */moot.sh) this=1 ;;
+      watch) watch=1 ;;
+    esac
+  done
+  [ "$this" = 1 ] && [ "$watch" = 1 ]
+}
+
 # Take watching atomically. noclobber makes the create fail if the file is
 # there, so two watches starting at once cannot both win. A file whose pid is
-# gone is stale (a session that died without its trap), and is taken over. A
+# gone, or no longer a moot watch for this .moot/ (the pid was recycled), is
+# stale (a session that died without its trap), and is taken over, unsignalled. A
 # holder that is alive gets up to about 2 s to finish exiting before this watch
 # gives up with exit 3, so a watch just killed does not block its restart. A
 # holder whose parent is pid 1, or has changed since it started, is an orphan:
@@ -720,7 +744,7 @@ watch_lock() {
       return 0
     fi
     pid=$(sed -n 's/^pid=//p' "$watch_file" 2>/dev/null | head -n 1)
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && is_this_watch "$pid"; then
       if [ "$waited" -eq 0 ]; then
         parent=$(sed -n 's/^parent=//p' "$watch_file" 2>/dev/null | head -n 1)
         now=$(ppid_of "$pid")
