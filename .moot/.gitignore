@@ -2,10 +2,9 @@
 # nothing of the host's .gitignore.
 /seen/
 /name
-/room
 /watching
 /watch.paused
-# A room that is a link is this machine's: add each one by name, with no
-# trailing slash (a link is not a directory to git), e.g.
-# rooms/dev
-# A room that is a real directory may be committed, so rooms/ is not ignored.
+# A room lives with its keeper: a real folder here is kept and committed, a link
+# is only heard and stays ignored (git sees a link as a file, not a folder).
+rooms/*
+!rooms/*/

@@ -6,24 +6,16 @@
 #
 # To install, copy this repo's .moot/ into the directory; this script is the
 # upgrade path. It refreshes what .moot/ ships (moot.sh, README.md and
-# SKILL.md) in <dir>/.moot/, seeds what is absent (.gitignore, rooms/ and
-# seen/, via init), and never touches what the host owns: rooms/, seen/, name,
-# room and an existing .moot/.gitignore, which a host edits to list its linked
-# rooms. Re-running changes nothing. Everything moot needs lives under .moot/,
-# so .moot/ sits beside .loom/ and .gremlin/ and claims nothing of the
-# directory it is in.
+# SKILL.md) in <dir>/.moot/, seeds a missing .gitignore, and never touches what
+# the host owns: rooms/, seen/, name and an existing .moot/.gitignore. Re-running
+# changes nothing. Everything moot needs lives under .moot/, so .moot/ sits
+# beside .loom/ and .gremlin/ and claims nothing of the directory it is in.
 #
 # The skill ships in every .moot/ so that a repo with a .moot/ knows how to use
 # it, and no other repo needs to.
 #
-# This creates no room: init no longer knows which one. Join a room after
-# installing:
-#
-#   <dir>/.moot/moot.sh join board
-#
-# The .gitignore it seeds is .moot/.gitignore, which ignores this participant's
-# seen/, name and room and never touches the host's own. It prints the line a
-# git repo wants for each linked room, as a hint.
+# This creates no room. Keep one with mkdir -p .moot/rooms/<room>/posts, or hear
+# one someone else keeps with .moot/moot.sh join <path-to-room>.
 
 set -euo pipefail
 
@@ -60,14 +52,10 @@ for f in moot.sh README.md SKILL.md; do
   mv -f -- "$host/.moot/.$f.installing" "$host/.moot/$f"
 done
 chmod +x "$host/.moot/moot.sh"
-# .gitignore is the host's once it exists: it adds its linked rooms to it.
+# .gitignore is the host's once it exists: leave it alone.
 [ -e "$host/.moot/.gitignore" ] ||
   cp -- "$source_dir/.moot/.gitignore" "$host/.moot/.gitignore"
 
-"$host/.moot/moot.sh" init >/dev/null
 printf 'installed moot into %s/.moot\n' "$host"
-printf 'join a room with: %s/.moot/moot.sh join <room>\n' "$host"
-printf "a linked room is this machine's, so add it by name, with no trailing slash,\n"
-printf 'to .moot/.gitignore (which already ignores seen/, name, room, watching and watch.paused):\n'
-printf '  rooms/<name>\n'
-printf 'a room that is a real directory may be committed.\n'
+printf 'keep a room: mkdir -p %s/.moot/rooms/<room>/posts\n' "$host"
+printf 'hear a room someone keeps: %s/.moot/moot.sh join <path-to-room>\n' "$host"

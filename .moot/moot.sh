@@ -14,24 +14,18 @@ export LC_ALL=C
 
 moot_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
-# A room is a folder under rooms/, and posts/ is all of it. That folder is the
-# sync unit; nothing else in .moot/ travels with it.
+# A room is a folder under rooms/, and posts/ is all of it. A room lives with its
+# keeper as a real folder; everyone else holds a link there.
 rooms_dir="$moot_dir/rooms"
 
 # The cursor is mine, not the room's, so it lives beside rooms/ rather than
-# inside one. Keyed by room and then by name: a room that gets synced by
-# accident still carries no reader's state, and each room is read separately.
+# inside one. Keyed by room and then by name, so each cursor has one writer.
 seen_dir="$moot_dir/seen"
 
 # Set by use_room(); every verb that is aimed at one room resolves first.
 room=
 room_dir=
 posts_dir=
-
-# Accumulated across the rooms catchup sweeps, so one sweep reports once.
-sweep_delivered=()
-sweep_reports=()
-sweep_changed=0
 
 die() { printf 'moot: %s\n' "$*" >&2; exit 1; }
 
@@ -50,27 +44,27 @@ usage() {
   cat <<'USAGE'
 moot — a directory of messages
 
-  moot.sh init [--json] [--as <name>] [--room <name>]
-  moot.sh join [--json] <room>
-  moot.sh subscribe [--json] <git-url> [<room>]
+  moot.sh join <path-to-room>
   moot.sh rooms
   moot.sh post [--json] [--as <name>] [--room <name>] [-m <text> | -f <file> | -]
-  moot.sh read [--room <name>] [--since <post-id>] [--tail <n>] [--follow]
-  moot.sh read --new [--as <name>] [--room <name>]
-  moot.sh catchup [--json] [--as <name>] [--room <name>] [--deliver <dir>]
-  moot.sh watch [--json] [--as <name>] [--room <name>] [--mentions] [--interval <s>]
+  moot.sh read [--room <name>] [--since <post-id>] [--tail <n>]
+  moot.sh read --new [--as <name>] [--room <name>] [--mentions] [--deliver <dir>]
+  moot.sh watch [--as <name>] [--room <name>] [--mentions] [--interval <s>]
 
 A post is <YYYYMMDD>-<HHMMSS>-<sender>.md in rooms/<room>/posts/, UTC, plain
 Markdown. Posts are immutable: there is no edit and no delete. A correction is
 a new post.
 
-post and read are aimed at one room; catchup, read --new and watch sweep every
-room here unless --room narrows it. watch waits for a new post from someone
-else, prints room/id, and exits; it never moves the cursor. read prints times in local time; the filenames
-stay UTC.
+A room lives with its keeper, as a real folder in the keeper's .moot/rooms/.
+join makes a link to a room someone else keeps; it never makes a room. To keep
+one yourself: mkdir -p .moot/rooms/<room>/posts
 
-join makes a room here; subscribe clones one that already exists elsewhere,
-where rooms/<room>/ is the clone and its git remote is the room's address.
+post and read are aimed at one room; read --new and watch cover every room here
+unless --room narrows them. read --new prints every post since my cursor (only
+the ones that mention me with --mentions, or written to <dir> with --deliver)
+and moves the cursor. watch waits for a new post from someone else, prints
+room/id, and exits; it never moves the cursor. read prints times in local time;
+the filenames stay UTC.
 USAGE
 }
 
@@ -79,8 +73,7 @@ USAGE
 # --as, then $MOOT_NAME, then .moot/name, then the sibling .gremlin/name, then
 # the name of the folder .moot/ sits in. Nobody is obliged to have a name file:
 # every step reads something that already exists, and a repo's checkout is
-# named after the repo on every machine. Shared with catchup: one chain, one
-# concept.
+# named after the repo on every machine.
 
 moot_name() {
   [ -r "$moot_dir/name" ] || return 1
@@ -137,8 +130,8 @@ resolve_name() {
 
 # ---------------------------------------------------------------- room resolution
 
-# Subscribed rooms, lexically. A room is subscribed by being a directory under
-# rooms/: one that arrived over rsync needs no join to count.
+# Rooms here, lexically: whatever is a folder under rooms/, real or linked. A
+# room that arrived by copy or rsync is heard by being there.
 subscribed_rooms() {
   local entry base
   [ -d "$rooms_dir" ] || return 0
@@ -150,54 +143,42 @@ subscribed_rooms() {
   done
 }
 
-room_pointer() {
-  [ -r "$moot_dir/room" ] || return 1
-  head -n 1 -- "$moot_dir/room" | tr -d '[:space:]'
-}
+room_hint() { printf 'keep one with: mkdir -p .moot/rooms/<room>/posts; hear one with: %s join <path-to-room>' "$0"; }
 
-# --room, then $MOOT_ROOM, then .moot/room, then the sole room. The same shape
-# as the name chain, for the same reason: with one room nobody types a flag.
-default_room() {
-  local name=
-  if [ -n "${MOOT_ROOM:-}" ]; then
-    name=$MOOT_ROOM
-  elif name=$(room_pointer) && [ -n "$name" ]; then
-    :
-  else
-    local rooms=()
-    while IFS= read -r name; do rooms+=("$name"); done < <(subscribed_rooms)
-    [ ${#rooms[@]} = 1 ] || return 1
-    name=${rooms[0]}
-  fi
-  [ -n "$name" ] || return 1
-  printf '%s' "$name"
-}
-
-# The error is the entire user interface of holding several rooms, so it says
-# what is subscribed and what to type, not what the usage line looks like.
-no_room() {
-  local rooms=() r
-  while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms)
-  if [ ${#rooms[@]} = 0 ]; then
-    die "no rooms here yet. Create one with: $0 join <room>"
-  fi
-  printf 'moot: several rooms here and none chosen:\n' >&2
-  printf '  %s\n' "${rooms[@]}" >&2
-  printf 'Pick one with --room <room>, or make one the default with: %s init --room <room>\n' "$0" >&2
-  exit 1
-}
-
-# Resolve the room this command is aimed at and point posts_dir at it.
+# Resolve the room a post or plain read is aimed at, and point posts_dir at it:
+# --room, or the sole room here. Several rooms and none chosen is an error that
+# lists them.
 use_room() {
-  local want=${1:-}
+  local want=${1:-} rooms=() r
   if [ -n "$want" ]; then
     room=$want
   else
-    room=$(default_room) || no_room
+    while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms)
+    case ${#rooms[@]} in
+      0) die "no rooms here yet; $(room_hint)" ;;
+      1) room=${rooms[0]} ;;
+      *)
+        printf 'moot: several rooms here and none chosen:\n' >&2
+        printf '  %s\n' "${rooms[@]}" >&2
+        printf 'Pick one with --room <room>\n' >&2
+        exit 1 ;;
+    esac
   fi
   check_segment 'room name' "$room"
   room_dir="$rooms_dir/$room"
   posts_dir="$room_dir/posts"
+}
+
+# The rooms a sweep covers: --room's one, or every room here.
+sweep_rooms() {
+  local room_opt=$1 r
+  if [ -n "$room_opt" ]; then
+    check_segment 'room name' "$room_opt"
+    [ -d "$rooms_dir/$room_opt" ] || die "no room $room_opt here; $(room_hint)"
+    printf '%s\n' "$room_opt"
+  else
+    subscribed_rooms
+  fi
 }
 
 # ---------------------------------------------------------------- post listing
@@ -234,7 +215,7 @@ post_body_path() {
   fi
 }
 
-# What a sweep (catchup, read --new) may read: stamped ids in order, leaving out
+# What a sweep (read --new) may read: stamped ids in order, leaving out
 # any stamped in the current UTC second or later. The cursor is the newest id
 # scanned, so a sweep that moved it onto the current second would never show a
 # post that lands later in that same second under a name sorting lower (bob
@@ -252,279 +233,66 @@ settled_ids() {
   done < <(post_ids)
 }
 
-# ---------------------------------------------------------------- init
-
-cmd_init() {
-  local json=0 changed=0 as= room_opt= d
-  [ "${1:-}" = --json ] && { json=1; shift; }
-  while [ $# -gt 0 ]; do
-    case $1 in
-      --as) [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
-      --room) [ $# -ge 2 ] || die "--room needs a room"; room_opt=$2; shift 2 ;;
-      -h|--help) usage; return 0 ;;
-      *) die "unknown option for init: $1" ;;
-    esac
-  done
-  # init makes a participant, not a room: it no longer knows which room, and
-  # `join` is the only thing that creates one.
-  for d in "$rooms_dir" "$seen_dir"; do
-    [ -d "$d" ] || { mkdir -p -- "$d"; changed=1; }
-  done
-  # Only written when asked for. Without it the rest of the name chain
-  # resolves, which is how a gremlin or a human already has a name.
-  if [ -n "$as" ]; then
-    local checked; checked=$(resolve_name "$as")
-    if [ "$checked" != "$(cat -- "$moot_dir/name" 2>/dev/null || true)" ]; then
-      printf '%s\n' "$checked" > "$moot_dir/name"; changed=1
-    fi
-  fi
-  # Likewise .moot/room: a pointer, written only on request, and unnecessary
-  # for as long as there is one room to point at.
-  if [ -n "$room_opt" ]; then
-    check_segment 'room name' "$room_opt"
-    if [ "$room_opt" != "$(cat -- "$moot_dir/room" 2>/dev/null || true)" ]; then
-      printf '%s\n' "$room_opt" > "$moot_dir/room"; changed=1
-    fi
-  fi
-  local default; default=$(default_room) || default=
-  if [ "$json" = 1 ]; then
-    printf '{"schema_version":1,"command":"init","ok":true,"changed":%s,"moot":"%s","room":%s}\n' \
-      "$([ "$changed" = 1 ] && echo true || echo false)" "$(json_escape "$moot_dir")" \
-      "$([ -n "$default" ] && printf '"%s"' "$(json_escape "$default")" || printf null)"
-  elif [ "$changed" = 1 ]; then
-    printf 'initialised moot at %s\n' "$moot_dir"
-    [ -n "$default" ] || printf 'no rooms yet: %s join <room>\n' "$0"
-  else
-    printf 'moot already initialised at %s\n' "$moot_dir"
-    [ -n "$default" ] || printf 'no rooms yet: %s join <room>\n' "$0"
-  fi
-}
-
 # ---------------------------------------------------------------- join and rooms
 
-# The room store the README names: a .moots/ directory beside the checkouts,
-# so beside the host that holds this .moot/. Prints the shared room's folder
-# when one of this name exists there, and fails when none does.
-shared_room_dir() {
-  local dir; dir=$(cd -- "$moot_dir/../.." 2>/dev/null && pwd) || return 1
-  [ -d "$dir/.moots/$1" ] || return 1
-  printf '%s' "$dir/.moots/$1"
+# relative_path <from-dir> <to-path>: the path that leads from one to the other,
+# both absolute and physical. A link written this way resolves the same from any
+# sibling checkout or worktree.
+relative_path() {
+  local from=${1%/} to=${2%/} up=
+  while [ "${to#"$from"/}" = "$to" ]; do
+    from=${from%/*}; up="../$up"
+  done
+  printf '%s%s' "$up" "${to#"$from"/}"
 }
 
+# join only ever makes a link. A room lives with its keeper, as a real folder in
+# the keeper's .moot/rooms/; everyone else holds a link to it. join never makes
+# a room, so a typo cannot make a private one that nobody else reads.
 cmd_join() {
-  local json=0 name= changed=0
-  [ "${1:-}" = --json ] && { json=1; shift; }
+  local target= name= real rooms_real rel link
   while [ $# -gt 0 ]; do
     case $1 in
       -h|--help) usage; return 0 ;;
       -*) die "unknown option for join: $1" ;;
-      *) [ -z "$name" ] || die "join takes one room"; name=$1; shift ;;
+      *) [ -z "$target" ] || die "join takes one path"; target=$1; shift ;;
     esac
   done
-  [ -n "$name" ] || die "join needs a room name"
+  [ -n "$target" ] || die "join needs the path to a room"
+  [ -d "$target/posts" ] \
+    || die "'$target' is not a room (no posts/ folder in it). join links to a room someone keeps; to keep one yourself: mkdir -p .moot/rooms/<room>/posts"
+
+  real=$(cd -P -- "$target" && pwd -P)
+  name=${target%/}; name=${name##*/}
+  case $name in .|..|'') name=${real##*/} ;; esac
   check_segment 'room name' "$name"
 
-  # A link that leads nowhere (dangling, or looping back on itself, as a
-  # relative target written from the wrong folder does) cannot be made into a
-  # room: say what is wrong with the link rather than let mkdir's error out.
-  if [ -L "$rooms_dir/$name" ] && [ ! -d "$rooms_dir/$name" ]; then
-    die "rooms/$name is a link that does not lead to a folder (dangling or looping); point it at the real room with an absolute path, or remove it"
+  mkdir -p -- "$rooms_dir"
+  rooms_real=$(cd -P -- "$rooms_dir" && pwd -P)
+  link="$rooms_dir/$name"
+  if [ "$link" -ef "$real" ]; then
+    printf 'already in rooms/%s\n' "$name"; return 0
+  fi
+  if [ -L "$link" ]; then
+    die "rooms/$name is already a link to $(readlink -- "$link"); remove it first (rm .moot/rooms/$name) to point it elsewhere"
+  elif [ -e "$link" ]; then
+    die "rooms/$name is a room kept here (a real folder); join links to rooms others keep"
   fi
 
-  # A shared room of this name wins over a new private one: a private room
-  # would take posts nobody else reads. Refuse, and print the link to make.
-  if [ ! -e "$rooms_dir/$name" ] && [ ! -L "$rooms_dir/$name" ]; then
-    local shared
-    if shared=$(shared_room_dir "$name"); then
-      die "a shared room named $name exists at $shared; joining would make a private one that shadows it. Link it instead: mkdir -p $(printf '%q' "$rooms_dir") && ln -s $(printf '%q' "$shared") $(printf '%q' "$rooms_dir/$name")"
-    fi
-  fi
-
-  local posts="$rooms_dir/$name/posts"
-  [ -d "$posts" ] || { mkdir -p -- "$posts"; changed=1; }
-  # Git cannot track an empty directory; without this a room committed before
-  # its first post loses posts/ on clone. Only the room needs it: a .gitkeep
-  # anywhere else in .moot/ would invite committing one participant's state.
-  [ -e "$posts/.gitkeep" ] || { : > "$posts/.gitkeep"; changed=1; }
-  [ -d "$seen_dir/$name" ] || { mkdir -p -- "$seen_dir/$name"; changed=1; }
-
-  if [ "$json" = 1 ]; then
-    printf '{"schema_version":1,"command":"join","ok":true,"changed":%s,"room":"%s","path":"%s"}\n' \
-      "$([ "$changed" = 1 ] && echo true || echo false)" \
-      "$(json_escape "$name")" "$(json_escape "rooms/$name")"
-  elif [ "$changed" = 1 ]; then
-    printf 'joined %s\n' "rooms/$name"
-  else
-    printf 'already in %s\n' "rooms/$name"
-  fi
+  rel=$(relative_path "$rooms_real" "$real")
+  ln -s -- "$rel" "$link"
+  printf 'joined rooms/%s -> %s\n' "$name" "$rel"
 }
 
 cmd_rooms() {
-  local default r any=0
+  local r any=0
   [ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { usage; return 0; }
   [ $# -eq 0 ] || die "rooms takes no arguments"
-  default=$(default_room) || default=
   while IFS= read -r r; do
     any=1
-    if [ "$r" = "$default" ]; then printf '* %s\n' "$r"; else printf '  %s\n' "$r"; fi
+    printf '%s\n' "$r"
   done < <(subscribed_rooms)
-  [ "$any" = 1 ] || printf 'no rooms here yet: %s join <room>\n' "$0"
-}
-
-# ---------------------------------------------------------------- subscribe
-
-# The room name a URL implies: the last path segment with any .git stripped.
-# Handles the scp-style git@host:board.git as well as a URL or a local path,
-# because all three end in the name and differ only in what precedes it.
-room_name_from_url() {
-  local url=$1 base
-  url=${url%/}
-  base=${url##*/}
-  base=${base##*:}
-  printf '%s' "${base%.git}"
-}
-
-# join creates a room; subscribe acquires one that already exists elsewhere.
-#
-# The clone *is* the room: the repository root is the room root, so posts/ sits
-# at the top of the repository and nothing else moot owns travels with it. That
-# is also why no file here records the URL — `git remote get-url origin` is
-# already the room's address, and a second copy could only drift from it.
-cmd_subscribe() {
-  local json=0 url= name= changed=0
-  [ "${1:-}" = --json ] && { json=1; shift; }
-  while [ $# -gt 0 ]; do
-    case $1 in
-      -h|--help) usage; return 0 ;;
-      -*) die "unknown option for subscribe: $1" ;;
-      *)
-        if [ -z "$url" ]; then url=$1
-        elif [ -z "$name" ]; then name=$1
-        else die "subscribe takes a git url and an optional room name"; fi
-        shift ;;
-    esac
-  done
-  [ -n "$url" ] || die "subscribe needs a git url"
-
-  # The one verb in this tool with a hard dependency. It says so in moot's own
-  # voice rather than letting git's stderr surface from three frames down.
-  command -v git >/dev/null 2>&1 || die "subscribe needs git on PATH"
-
-  [ -n "$name" ] || name=$(room_name_from_url "$url")
-  [ -n "$name" ] || die "cannot derive a room name from '$url' (pass one: $0 subscribe <url> <room>)"
-  check_segment 'room name' "$name"
-
-  local dest="$rooms_dir/$name"
-  if [ -e "$dest" ]; then
-    die "room $name is already here (rooms/$name)"
-  fi
-
-  mkdir -p -- "$rooms_dir"
-  # --depth 1 because a room's history is its files, not its commits. A failed
-  # clone leaves nothing behind: a half-room would be indistinguishable from a
-  # subscribed one, since a room is subscribed by being a directory here.
-  if ! git clone --quiet --depth 1 -- "$url" "$dest" 2>/dev/null; then
-    rm -rf -- "$dest"
-    die "cannot clone $url"
-  fi
-  changed=1
-
-  # A remote that is still empty is the ordinary way this starts: make the
-  # repository somewhere, subscribe, post. Seed posts/ exactly as join does so
-  # the first post has somewhere to land; the first commit carries it over.
-  local posts="$dest/posts"
-  [ -d "$posts" ] || mkdir -p -- "$posts"
-  [ -e "$posts/.gitkeep" ] || : > "$posts/.gitkeep"
-  [ -d "$seen_dir/$name" ] || mkdir -p -- "$seen_dir/$name"
-
-  if [ "$json" = 1 ]; then
-    printf '{"schema_version":1,"command":"subscribe","ok":true,"changed":%s,"room":"%s","path":"%s","url":"%s"}\n' \
-      "$([ "$changed" = 1 ] && echo true || echo false)" \
-      "$(json_escape "$name")" "$(json_escape "rooms/$name")" "$(json_escape "$url")"
-  else
-    printf 'subscribed %s\n' "rooms/$name"
-  fi
-}
-
-# ---------------------------------------------------------------- git transport
-
-# A room that is a clone syncs; a room that is not, does not. That is the whole
-# detection rule — no flag, no config key, no per-room settings file — and it
-# is why every helper below is guarded by this one.
-#
-# The .git test comes first for a second reason: without it, `git -C` on an
-# ordinary room would walk up and find the project repository that happens to
-# contain .moot/, and operate on that instead.
-room_is_clone() {
-  [ -e "$room_dir/.git" ] && command -v git >/dev/null 2>&1
-}
-
-git_room() { git -C "$room_dir" "$@"; }
-
-# The branch the remote itself declares. Asking the remote rather than assuming
-# the local name settles the case where two participants clone the same empty
-# repository under different init.defaultBranch settings and would otherwise
-# push past each other forever.
-git_room_target() {
-  local b
-  b=$(git_room ls-remote --symref origin HEAD 2>/dev/null \
-        | sed -n 's#^ref: refs/heads/\([^[:space:]]*\).*#\1#p' | head -n 1)
-  [ -n "$b" ] || b=$(git_room symbolic-ref --quiet --short HEAD 2>/dev/null) || b=
-  printf '%s' "$b"
-}
-
-# Bring the room up to date. Fetching with no refspec follows whatever branch
-# the remote's HEAD points at, so FETCH_HEAD is the room's current state
-# whatever anyone called their branch.
-#
-# Rebase rather than reset: a reset would discard a post committed while the
-# remote was unreachable, and losing a message is the one failure a board must
-# not have. Rebase is a no-op when there is nothing local, a fast-forward when
-# only the remote moved, and a replay when both did.
-git_room_fetch() {
-  git_room fetch --quiet origin 2>/dev/null || return 1
-  git_room rev-parse --quiet --verify FETCH_HEAD >/dev/null 2>&1 || return 0
-  if git_room rev-parse --quiet --verify HEAD >/dev/null 2>&1; then
-    # The identity is set here for the same reason git_room_commit sets it: a
-    # rebase writes commits too, and a host with no git config must still be
-    # able to read its room.
-    git_room -c user.name=moot -c user.email=moot@moot.invalid \
-      rebase --quiet FETCH_HEAD >/dev/null 2>&1 && return 0
-    git_room rebase --abort >/dev/null 2>&1 || true
-    return 1
-  fi
-  # Nothing committed here yet, so there is nothing to replay: take the remote
-  # wholesale. Untracked posts written before the first fetch are left alone.
-  git_room reset --quiet --hard FETCH_HEAD >/dev/null 2>&1 || return 1
-}
-
-# The commit is transport, not authorship — the filename already carries who
-# and when. The identity is set explicitly so a host with no git config can
-# still post, and so the log reads in moot's names rather than the machine's.
-git_room_commit() {
-  local id=$1 sender=$2
-  git_room add -A -- posts >/dev/null 2>&1 || return 1
-  if git_room diff --cached --quiet 2>/dev/null; then
-    return 0
-  fi
-  git_room -c "user.name=$sender" -c "user.email=$sender@moot.invalid" \
-    commit --quiet -m "$id" >/dev/null 2>&1
-}
-
-# A rejected push means someone else posted in the meantime. Unlike almost
-# everywhere else in git, this retry loop is honest rather than hopeful: every
-# post is a new uniquely named file, so the rebase it retries after has no
-# conflict available to have.
-git_room_push() {
-  local target n=0
-  target=$(git_room_target)
-  [ -n "$target" ] || return 1
-  while :; do
-    git_room push --quiet origin "HEAD:refs/heads/$target" >/dev/null 2>&1 && return 0
-    n=$((n + 1))
-    [ "$n" -le 3 ] || return 1
-    git_room_fetch || return 1
-  done
+  [ "$any" = 1 ] || printf 'no rooms here yet: keep one with mkdir -p .moot/rooms/<room>/posts, or hear one with %s join <path-to-room>\n' "$0"
 }
 
 # ---------------------------------------------------------------- post
@@ -532,10 +300,9 @@ git_room_push() {
 cmd_post() {
   local json=0 as= room_opt= body= have_body=0 stamp base target landing n
 
-  [ "${1:-}" = --json ] && { json=1; shift; }
-
   while [ $# -gt 0 ]; do
     case $1 in
+      --json) json=1; shift ;;
       --as) [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
       --room) [ $# -ge 2 ] || die "--room needs a room"; room_opt=$2; shift 2 ;;
       -m)   [ $# -ge 2 ] || die "-m needs text"; body=$2; have_body=1; shift 2 ;;
@@ -555,17 +322,7 @@ cmd_post() {
   [ -n "${body//[[:space:]]/}" ] || die "refusing to post an empty message"
 
   use_room "$room_opt"
-  [ -d "$posts_dir" ] || die "no posts/ in room $room (run: $0 join $room)"
-
-  # A private room with a shared namesake takes posts nobody else reads. Still
-  # post, since the room may be meant, but say so.
-  if [ ! -L "$room_dir" ]; then
-    local shared
-    if shared=$(shared_room_dir "$room") && [ ! "$room_dir" -ef "$shared" ]; then
-      printf 'moot: warning: room %s here is a private folder, but a shared room of that name exists at %s; nobody who reads that one sees this post. To use it, move this folder aside and run: ln -s %s %s\n' \
-        "$room" "$shared" "$(printf '%q' "$shared")" "$(printf '%q' "$room_dir")" >&2
-    fi
-  fi
+  [ -d "$posts_dir" ] || die "no room $room here; $(room_hint)"
 
   local sender; sender=$(resolve_name "$as")
   stamp=$(date -u +%Y%m%d-%H%M%S)
@@ -603,18 +360,6 @@ cmd_post() {
   done
   rm -f -- "$landing"
 
-  # The post is a file on a disk before git is involved, and it stays one if
-  # every network in the world is down. Commit, then push best-effort: a push
-  # that cannot go out now goes out with the next post or catchup.
-  local warn=
-  if room_is_clone; then
-    if git_room_commit "$base" "$sender"; then
-      git_room_push || warn="posted, but could not push $room to its remote"
-    else
-      warn="posted, but could not commit $room to its clone"
-    fi
-  fi
-
   if [ "$json" = 1 ]; then
     printf '{"schema_version":1,"command":"post","ok":true,"changed":true,"room":"%s","id":"%s","path":"%s","sender":"%s","timestamp":"%s"}\n' \
       "$(json_escape "$room")" \
@@ -623,9 +368,6 @@ cmd_post() {
   else
     printf 'posted rooms/%s/posts/%s.md\n' "$room" "$base"
   fi
-  # Out of band in both modes: a --json caller reads one object on stdout, and
-  # a failed push is news about the transport rather than about the post.
-  [ -z "$warn" ] || printf 'moot: %s\n' "$warn" >&2
 }
 
 # ---------------------------------------------------------------- read
@@ -649,8 +391,7 @@ render_body() {
 }
 
 # Does this id follow the filename grammar, <8 digits>-<6 digits>-<sender>? Only
-# such ids have a time to show, and only such ids are swept by catchup and
-# read --new; anything else in posts/ (a stray README.md, say) is still listed
+# such ids have a time to show, and only such ids are swept by read --new; anything else in posts/ (a stray README.md, say) is still listed
 # by plain read, under its own name.
 is_stamp_id() {
   case $1 in
@@ -728,7 +469,7 @@ render_post() {
   fi
 }
 
-# The cursor, shared by catchup and read --new: .moot/seen/<room>/<name>, one
+# The cursor, written by read --new: .moot/seen/<room>/<name>, one
 # post id, written by that name alone. cursor_get prints it (nothing if there is
 # none yet); cursor_put returns non-zero when the room's seen/ cannot be written.
 cursor_get() {
@@ -742,23 +483,25 @@ cursor_put() {
     && printf '%s\n' "$3" > "$seen_dir/$1/$2" 2>/dev/null
 }
 
-# read --new: everything since this reader's cursor, room by room, then the
-# cursor moves. Rooms stay separate, each under its own heading; there is no
-# merged timeline. It is the human's counterpart to catchup: catchup prints (or
-# delivers) only what mentions me, this prints everything, mentions highlighted
-# as read always does. Both move the one cursor.
+# read --new, the one catch-up verb: everything since this reader's cursor, room
+# by room, then the cursor moves. Rooms stay separate, each under its own
+# heading; there is no merged timeline. By default every new post prints,
+# mentions highlighted as read always does. --mentions keeps only the posts that
+# mention me (the cursor still moves past the rest). --deliver <dir> writes
+# those posts as files instead of printing, and implies --mentions.
 read_new() {
-  local as=$1 room_opt=$2 r me id cursor newest shown=0
-  local rooms=()
-  if [ -n "$room_opt" ]; then
-    check_segment 'room name' "$room_opt"
-    [ -d "$rooms_dir/$room_opt" ] || die "no room $room_opt here (run: $0 join $room_opt)"
-    rooms=("$room_opt")
-  else
-    while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms)
-  fi
+  local as=$1 room_opt=$2 mentions=$3 deliver=$4 r me id cursor newest
+  local shown=0 rooms=()
+  while IFS= read -r r; do rooms+=("$r"); done < <(sweep_rooms "$room_opt")
   me=$(resolve_name "$as")
-  init_colour
+
+  if [ -n "$deliver" ]; then
+    mentions=1
+    mkdir -p -- "$deliver" || die "cannot use deliver directory $deliver"
+    deliver=$(cd -- "$deliver" && pwd)
+  else
+    init_colour
+  fi
   sweep_now=$(date -u +%Y%m%d-%H%M%S)
 
   local head_on='' head_off=''
@@ -768,28 +511,49 @@ read_new() {
     use_room "$r"
     [ -d "$posts_dir" ] || continue
     cursor=$(cursor_get "$room" "$me")
-    local new=()
+    local new=() picked=()
     while IFS= read -r id; do
       if [ -z "$cursor" ] || [ "$id" \> "$cursor" ]; then new+=("$id"); fi
     done < <(settled_ids)
     [ ${#new[@]} -gt 0 ] || continue
     newest=${new[${#new[@]}-1]}
 
-    printf '\n%s══ %s · %s new ══%s\n' "$head_on" "$room" "${#new[@]}" "$head_off"
-    for id in "${new[@]}"; do render_post "$id"; done
-    shown=$((shown + ${#new[@]}))
+    for id in "${new[@]}"; do
+      if [ "$mentions" = 0 ] || post_mentions_me "$(post_body_path "$id")" "$me"; then picked+=("$id"); fi
+    done
 
+    if [ -n "$deliver" ]; then
+      for id in ${picked[@]+"${picked[@]}"}; do
+        deliver_post "$id" "$deliver" && shown=$((shown + 1))
+      done
+    elif [ ${#picked[@]} -gt 0 ]; then
+      printf '\n%s══ %s · %s %s ══%s\n' "$head_on" "$room" "${#picked[@]}" \
+        "$([ "$mentions" = 1 ] && echo "for $me" || echo new)" "$head_off"
+      for id in "${picked[@]}"; do render_post "$id"; done
+      shown=$((shown + ${#picked[@]}))
+    fi
+
+    # A room reachable read-only is a normal way to run. It still reads, the
+    # sweep goes on to the next room, and delivered filenames carry the room and
+    # post id, so a repeat delivers nothing twice.
     if ! cursor_put "$room" "$me" "$newest"; then
-      printf 'moot: cannot write %s (read-only room); the next --new will show these again\n' \
+      printf 'moot: cannot write %s (read-only room); the next --new will repeat these\n' \
         ".moot/seen/$room/$me" >&2
     fi
   done
 
-  if [ "$shown" = 0 ]; then printf 'nothing new for %s\n' "$me"; else printf '\n'; fi
+  if [ "$shown" = 0 ]; then
+    printf 'nothing new for %s\n' "$me"
+  elif [ -n "$deliver" ]; then
+    printf 'delivered %s mention(s) to %s\n' "$shown" "$deliver"   # one heartbeat line
+  else
+    printf '\n'
+  fi
 }
 
+
 cmd_read() {
-  local since= tail_n= follow=0 room_opt= id last= new=0 as=
+  local since= tail_n= room_opt= id new=0 as= mentions=0 deliver=
 
   while [ $# -gt 0 ]; do
     case $1 in
@@ -797,27 +561,28 @@ cmd_read() {
       --since) [ $# -ge 2 ] || die "--since needs a post id"; since=$2; shift 2 ;;
       --tail)  [ $# -ge 2 ] || die "--tail needs a count"; tail_n=$2; shift 2
                case $tail_n in ''|*[!0-9]*) die "--tail needs a number" ;; esac ;;
-      --follow) follow=1; shift ;;
       --new)   new=1; shift ;;
       --as)    [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
+      --mentions) mentions=1; shift ;;
+      --deliver)  [ $# -ge 2 ] || die "--deliver needs a directory"; deliver=$2; shift 2 ;;
       -h|--help) usage; return 0 ;;
       *) die "unknown option for read: $1" ;;
     esac
   done
 
   if [ "$new" = 1 ]; then
-    [ -z "$since$tail_n" ] && [ "$follow" = 0 ] \
-      || die "--new cannot be combined with --since, --tail or --follow: its cursor decides what is new"
-    read_new "$as" "$room_opt"
+    [ -z "$since$tail_n" ] \
+      || die "--new cannot be combined with --since or --tail: its cursor decides what is new"
+    read_new "$as" "$room_opt" "$mentions" "$deliver"
     return 0
   fi
-  [ -z "$as" ] || die "--as only goes with --new"
+  [ -z "$as$deliver" ] && [ "$mentions" = 0 ] || die "--as, --mentions and --deliver only go with --new"
 
   use_room "$room_opt"
-  [ -d "$posts_dir" ] || die "no posts/ in room $room (run: $0 join $room)"
+  [ -d "$posts_dir" ] || die "no room $room here; $(room_hint)"
   init_colour
 
-  local ids=() shown=()
+  local ids=()
   while IFS= read -r id; do ids+=("$id"); done < <(post_ids)
 
   # --since is exclusive: it is a cursor pointing at the last post already read.
@@ -835,31 +600,11 @@ cmd_read() {
     ids=("${ids[@]:$((${#ids[@]} - tail_n))}")
   fi
 
-  for id in ${ids[@]+"${ids[@]}"}; do
-    render_post "$id"
-    last=$id
-  done
-  [ ${#ids[@]} -gt 0 ] && printf '\n'
-
-  [ "$follow" = 1 ] || return 0
-
-  # Poll and append, so a human can watch a live moot with no other tooling.
-  # There is nothing to notify us: a moot is a directory, and it may be
-  # arriving over rsync or a sync folder.
-  while :; do
-    sleep "${MOOT_FOLLOW_INTERVAL:-2}"
-    shown=()
-    while IFS= read -r id; do shown+=("$id"); done < <(post_ids)
-    for id in ${shown[@]+"${shown[@]}"}; do
-      if [ -z "$last" ] || [ "$id" \> "$last" ]; then
-        render_post "$id"
-        last=$id
-      fi
-    done
-  done
+  for id in ${ids[@]+"${ids[@]}"}; do render_post "$id"; done
+  if [ ${#ids[@]} -gt 0 ]; then printf '\n'; fi
 }
 
-# ---------------------------------------------------------------- catchup
+# ---------------------------------------------------------------- mentions and delivery
 
 # The mentions in a post body, one per line, trailing sentence punctuation
 # trimmed. This is the only place the tool looks inside a post for meaning, and
@@ -932,170 +677,20 @@ deliver_post() {
   return 0
 }
 
-# One room's worth of the sweep: deliver what mentions me, advance the cursor.
-# Appends to the sweep's accumulators rather than reporting, because the caller
-# reports once however many rooms it visited.
-catchup_room() {
-  local me=$1 deliver=$2 json=$3 id
-  local cursor; cursor=$(cursor_get "$room" "$me")
-
-  local new=() newest=
-  while IFS= read -r id; do
-    if [ -z "$cursor" ] || [ "$id" \> "$cursor" ]; then new+=("$id"); fi
-  done < <(settled_ids)
-  [ ${#new[@]} -gt 0 ] && newest=${new[${#new[@]}-1]}
-
-  local mine=0
-  for id in ${new[@]+"${new[@]}"}; do
-    # No mention: advance past it silently. Still readable with `read`,
-    # interrupts nobody.
-    post_mentions_me "$(post_body_path "$id")" "$me" || continue
-    if [ -n "$deliver" ]; then
-      deliver_post "$id" "$deliver" || continue
-    else
-      [ "$json" = 1 ] || render_post "$id"
-    fi
-    sweep_delivered+=("$room/$id")
-    mine=$((mine + 1))
-  done
-
-  # Advance the cursor past everything swept, mentioned or not (settled_ids
-  # leaves the current second for the next sweep). The cursor is
-  # this participant's own state and never travels with the room, so two
-  # divergent copies reconcile on posts/ alone.
-  local cursor_written=0
-  if [ -n "$newest" ]; then
-    if cursor_put "$room" "$me" "$newest"; then
-      cursor_written=1
-    else
-      # A room reachable read-only is a normal way to run: delivery is still
-      # correct, because delivered filenames carry the room and the post id.
-      # The sweep goes on to the next room — one read-only room must not stop
-      # the rooms after it.
-      printf 'moot: cannot write %s (read-only room); nothing was delivered twice anyway\n' \
-        ".moot/seen/$room/$me" >&2
-    fi
-  fi
-  [ "$cursor_written" = 1 ] && sweep_changed=1
-  [ "$mine" -gt 0 ] && sweep_changed=1
-
-  sweep_reports+=("$(printf '{"room":"%s","since":%s,"cursor":%s,"cursor_written":%s,"scanned":%s,"delivered":%s}' \
-    "$(json_escape "$room")" \
-    "$([ -n "$cursor" ] && printf '"%s"' "$(json_escape "$cursor")" || printf null)" \
-    "$([ -n "${newest:-$cursor}" ] && printf '"%s"' "$(json_escape "${newest:-$cursor}")" || printf null)" \
-    "$([ "$cursor_written" = 1 ] && echo true || echo false)" \
-    "${#new[@]}" "$mine")")
-  return 0
-}
-
-# catchup is the one verb that is not aimed. post and read say a thing or look
-# at a thing somewhere, so they resolve to a single room; catchup asks "is
-# there anything for me", and the answer spans everything subscribed. Hence no
-# --all flag: all is the default, and --room narrows.
-cmd_catchup() {
-  local json=0 as= room_opt= deliver= r
-
-  [ "${1:-}" = --json ] && { json=1; shift; }
-
-  while [ $# -gt 0 ]; do
-    case $1 in
-      --as)      [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
-      --room)    [ $# -ge 2 ] || die "--room needs a room"; room_opt=$2; shift 2 ;;
-      --deliver) [ $# -ge 2 ] || die "--deliver needs a directory"; deliver=$2; shift 2 ;;
-      -h|--help) usage; return 0 ;;
-      *) die "unknown option for catchup: $1" ;;
-    esac
-  done
-
-  local rooms=()
-  if [ -n "$room_opt" ]; then
-    check_segment 'room name' "$room_opt"
-    [ -d "$rooms_dir/$room_opt" ] || die "no room $room_opt here (run: $0 join $room_opt)"
-    rooms=("$room_opt")
-  else
-    while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms)
-  fi
-
-  local me; me=$(resolve_name "$as")
-
-  if [ -n "$deliver" ]; then
-    mkdir -p -- "$deliver" || die "cannot use deliver directory $deliver"
-    deliver=$(cd -- "$deliver" && pwd)
-  fi
-
-  [ "$json" = 1 ] || init_colour
-
-  sweep_delivered=()
-  sweep_reports=()
-  sweep_changed=0
-  sweep_now=$(date -u +%Y%m%d-%H%M%S)
-  for r in ${rooms[@]+"${rooms[@]}"}; do
-    use_room "$r"
-    # Reader-initiated pull. catchup is already the verb that asks "is there
-    # anything for me", so the fetch belongs here and nowhere else. A fetch
-    # that fails is not a failed catchup: the room is a directory, and the
-    # directory is still readable.
-    if room_is_clone; then
-      if git_room_fetch; then
-        # Anything local that the rebase kept is a backlog from a post made
-        # while the remote was unreachable. This is where it drains.
-        if [ "$(git_room rev-parse HEAD 2>/dev/null)" \
-             != "$(git_room rev-parse FETCH_HEAD 2>/dev/null)" ]; then
-          git_room_push || true
-        fi
-      else
-        printf 'moot: could not fetch %s; reading what is here\n' "$r" >&2
-      fi
-    fi
-    [ -d "$posts_dir" ] || continue
-    catchup_room "$me" "$deliver" "$json"
-  done
-
-  if [ "$json" = 1 ]; then
-    # One command, one object. The sweep is a single question — "is there
-    # anything for me" — so it gets a single answer, and every delivered item
-    # names its room so a caller can act on it without parsing a filename.
-    local list= sep= item
-    for item in ${sweep_delivered[@]+"${sweep_delivered[@]}"}; do
-      list="$list$sep$(printf '{"room":"%s","id":"%s"}' \
-        "$(json_escape "${item%%/*}")" "$(json_escape "${item#*/}")")"
-      sep=,
-    done
-    local reports= rsep= rep
-    for rep in ${sweep_reports[@]+"${sweep_reports[@]}"}; do
-      reports="$reports$rsep$rep"; rsep=,
-    done
-    printf '{"schema_version":2,"command":"catchup","ok":true,"changed":%s,"sender":"%s","rooms":[%s],"delivered":[%s]}\n' \
-      "$([ "$sweep_changed" = 1 ] && echo true || echo false)" \
-      "$(json_escape "$me")" "$reports" "$list"
-  elif [ ${#sweep_delivered[@]} -gt 0 ]; then
-    if [ -n "$deliver" ]; then
-      # One heartbeat line however many rooms it swept.
-      printf 'delivered %s mention(s) to %s\n' "${#sweep_delivered[@]}" "$deliver"
-    else
-      printf '\n'
-    fi
-  elif [ -n "$deliver" ]; then
-    # Zero subscribed rooms is a normal state for a host that has installed
-    # moot and joined nothing, and a heartbeat must not spew.
-    printf 'nothing for %s\n' "$me"
-  fi
-}
-
 # ---------------------------------------------------------------- watch
 
 # watch is a one-shot wait for a session that has no heartbeat: it blocks until
 # a post lands that the session would want to see, prints one line per post,
 # and exits. The exit is the push. The session catches up, then starts the
-# watch again. It never touches seen/: catchup and read --new stay the cursor's
-# only writers, so pausing, stopping or restarting a watch loses nothing.
+# watch again. It never touches seen/: read --new stays the cursor's
+# only writer, so pausing, stopping or restarting a watch loses nothing.
 #
 # Two plain files beside rooms/, both this machine's and never committed:
 #   watching       held while a watch runs (pid, name, rooms, start time), so
 #                  there is one watcher per .moot/; a stale one is taken over.
 #   watch.paused   present: the watch fires on nothing. Removed: it carries on
 #                  from the newest post, so whatever landed while paused waits
-#                  for the next catchup instead of firing (a quiet unpause).
+#                  for the next read --new instead of firing (a quiet unpause).
 
 watch_file="$moot_dir/watching"
 pause_file="$moot_dir/watch.paused"
@@ -1123,14 +718,8 @@ watch_lock() {
   done
 }
 
-# The sender is everything after the stamp. An old same-second post may carry
-# -N after it, so bob-2 is still bob.
-id_is_from() {
-  local sender=${1:16} me=$2
-  [ "$sender" = "$me" ] && return 0
-  case $sender in "$me"-*) case ${sender#"$me"-} in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac ;; esac
-  return 1
-}
+# The sender is everything after the stamp.
+id_is_from() { [ "${1:16}" = "$2" ]; }
 
 newest_id() {
   local id last=
@@ -1139,16 +728,13 @@ newest_id() {
 }
 
 cmd_watch() {
-  local json=0 as= room_opt= mentions=0 interval=${MOOT_WATCH_INTERVAL:-5} r i id
-
-  [ "${1:-}" = --json ] && { json=1; shift; }
+  local as= room_opt= mentions=0 interval=${MOOT_WATCH_INTERVAL:-5} r i id item
 
   while [ $# -gt 0 ]; do
     case $1 in
       --as)       [ $# -ge 2 ] || die "--as needs a name"; as=$2; shift 2 ;;
       --room)     [ $# -ge 2 ] || die "--room needs a room"; room_opt=$2; shift 2 ;;
       --mentions) mentions=1; shift ;;
-      --json)     json=1; shift ;;
       --interval) [ $# -ge 2 ] || die "--interval needs seconds"; interval=$2; shift 2 ;;
       -h|--help)  usage; return 0 ;;
       *) die "unknown option for watch: $1" ;;
@@ -1157,13 +743,7 @@ cmd_watch() {
   case $interval in ''|*[!0-9.]*) die "--interval needs a number of seconds" ;; esac
 
   local rooms=()
-  if [ -n "$room_opt" ]; then
-    check_segment 'room name' "$room_opt"
-    [ -d "$rooms_dir/$room_opt" ] || die "no room $room_opt here (run: $0 join $room_opt)"
-    rooms=("$room_opt")
-  else
-    while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms)
-  fi
+  while IFS= read -r r; do rooms+=("$r"); done < <(sweep_rooms "$room_opt")
   [ ${#rooms[@]} -gt 0 ] || die "no rooms here to watch"
 
   local me; me=$(resolve_name "$as")
@@ -1174,7 +754,7 @@ cmd_watch() {
   trap 'exit 143' TERM
 
   # Where each room starts: the cursor, so a post that landed after the last
-  # catchup still fires; with no cursor yet, the newest post, so a first watch
+  # read --new still fires; with no cursor yet, the newest post, so a first watch
   # doesn't fire on the whole history. Starting paused is an unpause later.
   # Parallel arrays, not an associative one: bash 3 has none.
   local base=() paused=0
@@ -1212,30 +792,18 @@ cmd_watch() {
     sleep "$interval"
   done
 
-  if [ "$json" = 1 ]; then
-    local list= sep= item
-    for item in "${hits[@]}"; do
-      list="$list$sep$(printf '{"room":"%s","id":"%s"}' \
-        "$(json_escape "${item%%/*}")" "$(json_escape "${item#*/}")")"
-      sep=,
-    done
-    printf '{"schema_version":2,"command":"watch","ok":true,"sender":"%s","posts":[%s]}\n' \
-      "$(json_escape "$me")" "$list"
-  else
-    for item in "${hits[@]}"; do printf '%s\n' "$item"; done
-  fi
+  for item in "${hits[@]}"; do printf '%s\n' "$item"; done
 }
 
 # ---------------------------------------------------------------- dispatch
 
 case ${1:-help} in
-  init) shift; cmd_init "$@" ;;
   join) shift; cmd_join "$@" ;;
-  subscribe) shift; cmd_subscribe "$@" ;;
   rooms) shift; cmd_rooms "$@" ;;
   post) shift; cmd_post "$@" ;;
   read) shift; cmd_read "$@" ;;
-  catchup) shift; cmd_catchup "$@" ;;
+  # Deprecated alias, kept for one release for callers that still run it.
+  catchup) shift; cmd_read --new --mentions "$@" ;;
   watch) shift; cmd_watch "$@" ;;
   help|-h|--help) usage ;;
   *) usage >&2; die "unknown command: $1" ;;
