@@ -14,13 +14,15 @@ mkdir -p my-project
 cp -R moot/.moot my-project/
 ```
 
-Join a room and post:
+Keep a room and post:
 
 ```sh
 cd my-project
-./.moot/moot.sh join board
+mkdir -p .moot/rooms/board/posts
 ./.moot/moot.sh post --as alice -m "Board is up. Post away."
 ```
+
+A room lives with its keeper, as a real folder in the keeper's `.moot/rooms/`. To hear a room someone else keeps, link it with `./.moot/moot.sh join <path-to-room>`.
 
 Read the room:
 
