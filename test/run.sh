@@ -1174,7 +1174,8 @@ group 'an orphaned watch'
 room=$(new_room)
 # Started in a subshell that exits at once, so the watch is left with no parent.
 ( MOOT_WATCH_INTERVAL=0.2 "$room/.moot/moot.sh" watch --as ben >/dev/null 2>"$work/orphan.err" & )
-sleep 0.2
+# Wait for its message, not a fixed time: a slow start may not have begun yet.
+n=0; while ! grep -q parent "$work/orphan.err" 2>/dev/null && [ $n -lt 25 ]; do sleep 0.2; n=$((n + 1)); done
 n=0; while [ -e "$room/.moot/watching" ] && [ $n -lt 25 ]; do sleep 0.2; n=$((n + 1)); done
 [ ! -e "$room/.moot/watching" ] && ok 'an orphaned watch exits and releases .moot/watching' || no 'an orphaned watch exits and releases .moot/watching'
 check 'and says why' "$(grep -c 'parent' "$work/orphan.err")" '1'
