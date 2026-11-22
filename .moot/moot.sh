@@ -239,7 +239,7 @@ repair_links() {
     case $to in /*) there=$to ;; *) there=$rooms_dir/$to ;; esac
     if [ -d "$there/posts" ]; then
       [ ! -e "$rooms_dir/$new" ] && [ ! -L "$rooms_dir/$new" ] || continue
-      ln -s -- "$to" "$rooms_dir/$new" 2>/dev/null || [ -L "$rooms_dir/$new" ] || continue
+      ln -sn -- "$to" "$rooms_dir/$new" 2>/dev/null || [ -L "$rooms_dir/$new" ] || continue
       rm -f -- "$entry"
       if [ -d "$seen_dir/$name" ] && [ ! -e "$seen_dir/$new" ]; then
         mv -- "$seen_dir/$name" "$seen_dir/$new" 2>/dev/null || true
@@ -368,7 +368,8 @@ cmd_join() {
   esac
 
   rel=$(relative_path "$rooms_real" "$real")
-  ln -s -- "$rel" "$link"
+  # -n never follows a link another command made here a moment ago.
+  ln -sn -- "$rel" "$link" 2>/dev/null || [ "$link" -ef "$real" ] || die "cannot link rooms/$name"
   printf 'joined rooms/%s -> %s\n' "$name" "$rel"
 }
 

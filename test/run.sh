@@ -1443,6 +1443,30 @@ d create ops >/dev/null
 out=$(a join "$parent/dave/.moot/rooms/ops" 2>&1); rc=$?
 check 'join refuses a name whose other form is here' "$rc:$out" '1:moot: rooms/ops.archived is already here'
 
+group 'a link another command made a moment ago is never followed'
+# A stand-in ln that acts out a second command making the same link first,
+# between the test that the name is free and the ln itself.
+mkdir -p "$work/lnbin"; real_ln=$(command -v ln)
+cat > "$work/lnbin/ln" <<'STUB'
+#!/bin/sh
+for dest; do :; done
+eval "src=\${$(($# - 1))}"
+[ -e "$dest" ] || [ -L "$dest" ] || "$REAL_LN" -s "$src" "$dest"
+exec "$REAL_LN" "$@"
+STUB
+chmod +x "$work/lnbin/ln"
+raced() { ( cd "$work" && PATH="$work/lnbin:$PATH" REAL_LN=$real_ln MOOT_NAME= "$@" ); }
+pair_layout
+c create ops >/dev/null; c create dev >/dev/null
+a join "$parent/carol/.moot/rooms/ops" >/dev/null
+c archive ops >/dev/null
+raced "$parent/alice/.moot/moot.sh" rooms >/dev/null 2>&1
+check 'link repair losing the race writes nothing into the room' "$(ls -A "$parent/carol/.moot/rooms/ops.archived")" 'posts'
+check 'and the link is there' "$(readlink "$parent/alice/.moot/rooms/ops.archived")" '../../../carol/.moot/rooms/ops.archived'
+out=$(raced "$parent/dave/.moot/moot.sh" join "$parent/carol/.moot/rooms/dev" 2>&1); rc=$?
+check 'join losing the race succeeds' "$rc:$out" '0:joined rooms/dev -> ../../../carol/.moot/rooms/dev'
+check 'and writes nothing into the room' "$(ls -A "$parent/carol/.moot/rooms/dev")" 'posts'
+
 # ---------------------------------------------------------------- direct messages
 
 group 'dm'
