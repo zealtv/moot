@@ -173,6 +173,10 @@ subscribed_rooms() {
 }
 
 is_archived() { case $1 in *.archived) return 0 ;; esac; return 1; }
+is_dm() { case ${1%.archived} in dm-*) return 0 ;; esac; return 1; }
+dangles() { [ -L "$1" ] && [ ! -e "$1" ]; }
+# The other form of a name, ops or ops.archived, left in $other.
+other_form() { if is_archived "$1"; then other=${1%.archived}; else other=$1.archived; fi; }
 
 room_hint() { printf 'keep one with: mkdir -p .moot/rooms/<room>/posts; hear one with: %s join <path-to-room>' "$0"; }
 
@@ -186,9 +190,11 @@ named_room() {
   fi
 }
 
-# Resolve the room a post or plain read is aimed at, and point posts_dir at it:
-# --room, or the sole live room here. Several and none chosen is an error that
-# lists them.
+# Resolve the room a verb is aimed at, and point posts_dir at it: the one named
+# (or its archived form), or the sole live room here. Several and none chosen is
+# an error that lists them, and so is a room not here, unless a second argument
+# asks for a return of 1 instead. Called in the main shell, so that a die stops
+# the command (one inside a process substitution would not).
 use_room() {
   local want=${1:-} rooms=() r
   if [ -n "$want" ]; then
@@ -207,15 +213,12 @@ use_room() {
   fi
   room_dir="$rooms_dir/$room"
   posts_dir="$room_dir/posts"
+  [ ! -d "$posts_dir" ] || return 0
+  [ -z "${2:-}" ] || return 1
+  die "no room $room here; $(room_hint)"
 }
 
-# The rooms a pass covers: --room's one, or every live room here. Called in the
-# main shell first, so that a bad --room stops the command (a die inside a
-# process substitution would not); it leaves the room found in $room.
-check_room_opt() {
-  named_room "$1"
-  [ -d "$rooms_dir/$room" ] || die "no room $1 here; $(room_hint)"
-}
+# The rooms a pass covers: --room's one, or every live room here.
 pass_rooms() {
   if [ -n "$1" ]; then printf '%s\n' "$1"; else subscribed_rooms live; fi
 }
@@ -227,15 +230,15 @@ pass_rooms() {
 # drop a link to an archived room that has gone, or leave it for rooms to report.
 # Built-in tests, and readlink only for a link that dangles, so it is cheap.
 repair_links() {
-  local entry name target new to there
+  local entry name target new to there other
   [ -d "$rooms_dir" ] || return 0
   for entry in "$rooms_dir"/*; do
-    [ -L "$entry" ] && [ ! -e "$entry" ] || continue
+    dangles "$entry" || continue
     name=${entry##*/}
     target=$(readlink -- "$entry") || continue
     target=${target%/}
-    if is_archived "$name"; then new=${name%.archived}; else new=$name.archived; fi
-    if is_archived "$target"; then to=${target%.archived}; else to=$target.archived; fi
+    other_form "$name"; new=$other
+    other_form "$target"; to=$other
     case $to in /*) there=$to ;; *) there=$rooms_dir/$to ;; esac
     if [ -d "$there/posts" ]; then
       [ ! -e "$rooms_dir/$new" ] && [ ! -L "$rooms_dir/$new" ] || continue
@@ -262,7 +265,7 @@ repair_links() {
   for entry in "$seen_dir"/*; do
     [ -d "$entry" ] || continue
     name=${entry##*/}
-    if is_archived "$name"; then new=${name%.archived}; else new=$name.archived; fi
+    other_form "$name"; new=$other
     [ ! -e "$rooms_dir/$name" ] && [ ! -L "$rooms_dir/$name" ] && [ -d "$rooms_dir/$new" ] && [ ! -e "$seen_dir/$new" ] || continue
     mv -- "$entry" "$seen_dir/$new" 2>/dev/null || true
   done
@@ -367,14 +370,13 @@ cmd_join() {
   fi
   name_free "$name"
   # A DM is for its pair: the joiner must be one of its two names.
-  case ${name%.archived} in
-    dm-*)
-      me=$(own_name) || exit 1
-      case ${name%.archived} in
-        "dm-$me-"?* | "dm-"?*"-$me") ;;
-        *) die "rooms/$name is a direct message for two others; only its pair joins it" ;;
-      esac ;;
-  esac
+  if is_dm "$name"; then
+    me=$(own_name) || exit 1
+    case ${name%.archived} in
+      "dm-$me-"?* | "dm-"?*"-$me") ;;
+      *) die "rooms/$name is a direct message for two others; only its pair joins it" ;;
+    esac
+  fi
 
   rel=$(relative_path "$rooms_real" "$real")
   # -n never follows a link another command made here a moment ago.
@@ -385,7 +387,7 @@ cmd_join() {
 # ops and ops.archived are one name: refuse either while the other is here.
 name_free() {
   local n other
-  if is_archived "$1"; then other=${1%.archived}; else other=$1.archived; fi
+  other_form "$1"
   for n in "$1" "$other"; do
     if [ -e "$rooms_dir/$n" ] || [ -L "$rooms_dir/$n" ]; then die "rooms/$n is already here"; fi
   done
@@ -406,10 +408,8 @@ one_room() {
 cmd_create() {
   local arg; one_room create "$@"
   check_segment 'room name' "$arg"
-  case $arg in
-    dm-*) die "dm- names are kept for direct messages; start one with: $0 dm <who>" ;;
-    *.archived) die "names ending .archived are kept for archived rooms" ;;
-  esac
+  ! is_dm "$arg" || die "dm- names are kept for direct messages; start one with: $0 dm <who>"
+  ! is_archived "$arg" || die "names ending .archived are kept for archived rooms"
   name_free "$arg"
   mkdir -p -- "$rooms_dir/$arg/posts"
   : > "$rooms_dir/$arg/posts/.gitkeep"
@@ -437,8 +437,8 @@ cmd_archive() {
   local arg dir; one_room archive "$@"
   named_room "$arg"
   dir="$rooms_dir/$room"
-  case ${room%.archived} in dm-*) die "rooms/$room is a direct message, and a DM is never archived; its hearer can leave it" ;; esac
-  if [ -L "$dir" ] && [ ! -e "$dir" ]; then
+  ! is_dm "$room" || die "rooms/$room is a direct message, and a DM is never archived; its hearer can leave it"
+  if dangles "$dir"; then
     die "rooms/$room leads nowhere; leave it with: $0 leave $room"
   elif [ ! -d "$dir" ]; then
     die "no room $room here"
@@ -465,7 +465,7 @@ cmd_rooms() {
   done < <(subscribed_rooms)
   # What link repair left alone: where each leads, and how to let it go.
   for entry in "$rooms_dir"/*; do
-    [ -L "$entry" ] && [ ! -e "$entry" ] || continue
+    dangles "$entry" || continue
     printf 'moot: rooms/%s leads nowhere (%s); leave it with: %s leave %s\n' \
       "${entry##*/}" "$(readlink -- "$entry")" "$0" "${entry##*/}" >&2
   done
@@ -499,7 +499,6 @@ cmd_post() {
   [ -n "${body//[[:space:]]/}" ] || die "refusing to post an empty message"
 
   use_room "$room_opt"
-  [ -d "$posts_dir" ] || die "no room $room here; $(room_hint)"
   ! is_archived "$room" || die "${room%.archived} is archived; posting is closed"
 
   local sender; sender=$(resolve_name "$as")
@@ -671,7 +670,7 @@ cursor_put() {
 read_new() {
   local as=$1 room_opt=$2 mentions=$3 deliver=$4 r me id cursor newest
   local shown=0 rooms=()
-  if [ -n "$room_opt" ]; then check_room_opt "$room_opt"; room_opt=$room; fi
+  if [ -n "$room_opt" ]; then use_room "$room_opt"; room_opt=$room; fi
   while IFS= read -r r; do rooms+=("$r"); done < <(pass_rooms "$room_opt")
   me=$(resolve_name "$as")
 
@@ -688,8 +687,7 @@ read_new() {
   if [ "$colour_on" = 1 ]; then head_on=$(printf '\033[1m'); head_off=$(printf '\033[0m'); fi
 
   for r in ${rooms[@]+"${rooms[@]}"}; do
-    use_room "$r"
-    [ -d "$posts_dir" ] || continue
+    use_room "$r" soft || continue
     cursor=$(cursor_get "$room" "$me")
     local new=() picked=()
     while IFS= read -r id; do
@@ -759,7 +757,6 @@ cmd_read() {
   [ -z "$as$deliver" ] && [ "$mentions" = 0 ] || die "--as, --mentions and --deliver only go with --new"
 
   use_room "$room_opt"
-  [ -d "$posts_dir" ] || die "no room $room here; $(room_hint)"
   init_colour
 
   local ids=()
@@ -818,7 +815,7 @@ post_mentions_me() {
 # the other side does, so a DM always reaches its reader; elsewhere, an @ of me
 # or @all.
 counts_for_me() {
-  case ${room%.archived} in dm-*) id_is_from "$1" "$2" || return 0 ;; esac
+  if is_dm "$room"; then id_is_from "$1" "$2" || return 0; fi
   post_mentions_me "$(post_body_path "$1")" "$2"
 }
 
@@ -988,7 +985,7 @@ cmd_watch() {
   # heard from its next poll.
   local seen_opt=
   for r in ${full[@]+"${full[@]}"}; do
-    check_room_opt "$r"; r=$room
+    use_room "$r"; r=$room
     case " $seen_opt " in *" $r "*) ;; *) seen_opt="$seen_opt $r" ;; esac
   done
   [ -n "$(subscribed_rooms live)$seen_opt" ] || die "no rooms here to watch"
@@ -1027,7 +1024,7 @@ cmd_watch() {
       idx=
       for k in "${!known[@]}"; do [ "${known[$k]}" = "$r" ] && idx=$k; done
       [ -z "$idx" ] || continue
-      use_room "$r"
+      use_room "$r" soft || true
       idx=${#known[@]}
       known[$idx]=$r
       base[$idx]=$(cursor_get "$room" "$me")
@@ -1038,7 +1035,7 @@ cmd_watch() {
       paused=1
     else
       if [ "$paused" = 1 ]; then
-        for i in "${!known[@]}"; do use_room "${known[$i]}"; base[$i]=$(newest_id); done
+        for i in "${!known[@]}"; do use_room "${known[$i]}" soft || true; base[$i]=$(newest_id); done
         paused=0
       fi
       for i in "${!known[@]}"; do
@@ -1050,8 +1047,7 @@ cmd_watch() {
         elif [ "$mentions" = 1 ]; then
           only=1
         fi
-        use_room "$r"
-        [ -d "$posts_dir" ] || continue
+        use_room "$r" soft || continue
         while IFS= read -r id; do
           is_stamp_id "$id" || continue
           [ -z "${base[$i]}" ] || [ "$id" \> "${base[$i]}" ] || continue
@@ -1125,7 +1121,7 @@ cmd_dm() {
 
   dm_closed "$rooms_dir" "$room"
   dm_closed "$their/rooms" "$room"
-  if [ -L "$mine" ] && [ ! -e "$mine" ]; then
+  if dangles "$mine"; then
     die "rooms/$room leads nowhere; leave it first: $0 leave $room"
   fi
   # 1. Here already. If I keep it and the other has left, link it there again.
