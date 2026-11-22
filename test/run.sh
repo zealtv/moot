@@ -1310,6 +1310,13 @@ room=$(new_room)
 
 # ---------------------------------------------------------------- room verbs
 
+# refuses <label> <word> <command...>: the command exits 1 and its stderr says <word>.
+refuses() {
+  local label=$1 word=$2 out rc; shift 2
+  out=$("$@" 2>&1 >/dev/null); rc=$?
+  case "$rc:$out" in "1:"*"$word"*) ok "$label" ;; *) no "$label" "$rc:$out" ;; esac
+}
+
 group 'create'
 host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
 check 'create prints the room it made' "$(j create ops)" 'created rooms/ops'
@@ -1324,8 +1331,8 @@ out=$(j create dm-alice-bob 2>&1); rc=$?
 check 'create refuses a dm- name' "$rc" '1'
 case $out in *'kept for direct messages'*' dm <who>'*) ok 'and names dm instead' ;; *) no 'and names dm instead' "$out" ;; esac
 [ -e "$host/.moot/rooms/dm-alice-bob" ] && no 'and makes nothing' || ok 'and makes nothing'
-j create x.archived >/dev/null 2>&1 && no 'create refuses a name ending .archived' || ok 'create refuses a name ending .archived'
-j create 'bad room' >/dev/null 2>&1 && no 'create refuses an unsafe name' || ok 'create refuses an unsafe name'
+refuses 'create refuses a name ending .archived' 'kept for archived rooms' j create x.archived
+refuses 'create refuses an unsafe name' 'not filename-safe' j create 'bad room'
 
 # One folder per participant under a parent, as checkouts sit side by side.
 # Each name comes from its folder.
@@ -1352,7 +1359,7 @@ out=$(c leave ops 2>&1); rc=$?
 check 'leave refuses a room kept here' "$rc" '1'
 case $out in *'kept here (a real folder)'*) ok 'and says so' ;; *) no 'and says so' "$out" ;; esac
 [ -d "$parent/carol/.moot/rooms/ops/posts" ] && ok 'and leaves the real folder' || no 'and leaves the real folder'
-a leave ops >/dev/null 2>&1 && no 'leave of a room not here fails' || ok 'leave of a room not here fails'
+refuses 'leave of a room not here fails' 'no room ops here' a leave ops
 
 # ---------------------------------------------------------------- archive and link repair
 
@@ -1375,11 +1382,11 @@ out=$(c archive dm-alice-carol 2>&1); rc=$?
 check 'archive refuses a dm- room' "$rc" '1'
 case $out in *'never archived'*) ok 'and says a DM is never archived' ;; *) no 'and says a DM is never archived' "$out" ;; esac
 [ -d "$parent/carol/.moot/rooms/dm-alice-carol" ] && ok 'and leaves it as it was' || no 'and leaves it as it was'
-c archive nosuch >/dev/null 2>&1 && no 'archive of a room not here fails' || ok 'archive of a room not here fails'
+refuses 'archive of a room not here fails' 'no room nosuch here' c archive nosuch
 
 group 'link repair follows an archive'
-err=$(a rooms 2>&1 >/dev/null)
-check "a hearer's next command relinks the room" "$(readlink "$parent/alice/.moot/rooms/ops.archived")" '../../../carol/.moot/rooms/ops.archived'
+err=$(a read --new 2>&1 >/dev/null)
+check "a hearer's next command (read --new) relinks the room" "$(readlink "$parent/alice/.moot/rooms/ops.archived")" '../../../carol/.moot/rooms/ops.archived'
 [ ! -e "$parent/alice/.moot/rooms/ops" ] && [ ! -L "$parent/alice/.moot/rooms/ops" ] && ok 'and removes the old link' || no 'and removes the old link'
 check 'and moves the cursor with it' "$(cat "$parent/alice/.moot/seen/ops.archived/alice" 2>/dev/null):$([ -e "$parent/alice/.moot/seen/ops" ] && echo left)" '20260829-090000-alice:'
 check 'and says how to read the rest' "$err" 'moot: rooms/ops is archived, now rooms/ops.archived (read --new --room ops.archived shows the rest)'
@@ -1388,13 +1395,14 @@ check 'a second command has nothing to repair' "$(a rooms 2>&1)" 'ops.archived'
 group 'an archived room'
 out=$(a post --room ops -m 'too late' 2>&1); rc=$?
 check 'post in an archived room is refused' "$rc:$out" '1:moot: ops is archived; posting is closed'
-c post --room ops.archived -m 'too late' >/dev/null 2>&1 && no 'even by its keeper' || ok 'even by its keeper'
+refuses 'even by its keeper' 'posting is closed' c post --room ops.archived -m 'too late'
 check 'and nothing landed' "$(ls "$parent/carol/.moot/rooms/ops.archived/posts" | wc -l | tr -d ' ')" '1'
 check 'read --room ops still finds ops.archived' "$(a read --room ops | grep -c '^before$')" '1'
 printf 'a last word\n' > "$parent/carol/.moot/rooms/ops.archived/posts/20260829-100000-carol.md"
 check 'read --new leaves an archived room out' "$(a read --new)" 'nothing new for alice'
 check 'unless --room names it' "$(a read --new --room ops | grep -c 'a last word')" '1'
 check 'and that moves its cursor' "$(cat "$parent/alice/.moot/seen/ops.archived/alice")" '20260829-100000-carol'
+check 'archive of a heard archived room is already so' "$(a archive ops)" 'already archived rooms/ops.archived'
 c create dev >/dev/null; c create zed >/dev/null
 check 'rooms lists live rooms first, then archived ones' "$(c rooms | tr '\n' ' ')" 'dev dm-alice-carol zed ops.archived '
 
@@ -1402,6 +1410,42 @@ host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
 j create board >/dev/null; j create old >/dev/null; j archive old >/dev/null
 j post --as ben -m 'to the sole live room' >/dev/null
 check 'the sole-room default counts live rooms only' "$(ls "$host/.moot/rooms/board/posts"/*.md | wc -l | tr -d ' ')" '1'
+
+group 'link repair follows an un-archive'
+mv "$parent/carol/.moot/rooms/ops.archived" "$parent/carol/.moot/rooms/ops"
+err=$(a post --room ops -m 'back' 2>&1 >/dev/null); rc=$?
+check 'a by-hand mv back is followed (by post)' "$(readlink "$parent/alice/.moot/rooms/ops")" '../../../carol/.moot/rooms/ops'
+check 'with the cursor' "$(cat "$parent/alice/.moot/seen/ops/alice" 2>/dev/null)" '20260829-100000-carol'
+check 'and says so' "$err" 'moot: rooms/ops.archived is open again, now rooms/ops'
+check 'and that post lands in the open room' "$rc:$(cat "$parent/carol/.moot/rooms/ops/posts"/*-alice.md | grep -c '^back$')" '0:1'
+
+group 'link repair clears an archived room that has gone'
+c archive ops >/dev/null; err=$(a status 2>&1 >/dev/null)
+case $err in *'rooms/ops is archived, now rooms/ops.archived'*) ok 'status repairs too' ;; *) no 'status repairs too' "$err" ;; esac
+rm -rf "${parent:?}/carol/.moot/rooms/ops.archived"
+a help >/dev/null 2>&1
+[ -L "$parent/alice/.moot/rooms/ops.archived" ] && ok 'help leaves a dangling link as it was' || no 'help leaves a dangling link as it was'
+err=$(a status 2>&1 >/dev/null)
+[ ! -e "$parent/alice/.moot/rooms/ops.archived" ] && [ ! -L "$parent/alice/.moot/rooms/ops.archived" ] && ok 'the dangling archived link is removed' || no 'the dangling archived link is removed'
+[ ! -e "$parent/alice/.moot/seen/ops.archived" ] && ok 'with its cursor' || no 'with its cursor'
+case $err in *'rooms/ops.archived has gone from its keeper'*) ok 'and says so' ;; *) no 'and says so' "$err" ;; esac
+
+group 'link repair leaves any other dangling link'
+d join "$parent/carol/.moot/rooms/dev" >/dev/null
+printf 'x\n' > "$parent/carol/.moot/rooms/dev/posts/20260829-090000-carol.md"
+d read --new >/dev/null
+mv "$parent/carol/.moot/rooms/dev" "$parent/carol/dev-away"
+err=$(d rooms 2>&1 >/dev/null)
+refuses 'archive of a link that leads nowhere is refused' 'leads nowhere; leave it with' d archive dev
+[ -L "$parent/dave/.moot/rooms/dev" ] && ok 'a live room that has gone stays linked' || no 'a live room that has gone stays linked'
+[ -f "$parent/dave/.moot/seen/dev/dave" ] && ok 'and keeps its cursor' || no 'and keeps its cursor'
+check 'and rooms reports it with the leave line' "$err" "moot: rooms/dev leads nowhere (../../../carol/.moot/rooms/dev); leave it with: $parent/dave/.moot/moot.sh leave dev"
+mv "$parent/carol/dev-away" "$parent/carol/.moot/rooms/dev"
+check 'so the room is heard again when it comes back' "$(d rooms 2>&1)" 'dev'
+ln -s ../../../ghost/.moot/rooms/gone.archived "$parent/dave/.moot/rooms/gone.archived"
+d rooms >/dev/null 2>&1
+[ -L "$parent/dave/.moot/rooms/gone.archived" ] && ok "an archived link stays when its keeper's rooms/ is not there" || no "an archived link stays when its keeper's rooms/ is not there"
+check 'and leave lets it go' "$(d leave gone.archived)" 'left rooms/gone.archived'
 
 group "link repair carries the keeper's own cursor"
 pair_layout
@@ -1419,37 +1463,28 @@ mv "$parent/carol/.moot/rooms/ops" "$parent/carol/.moot/rooms/ops.archived"
 check 'a by-hand archive carries it too' "$(c read --new --room ops)" 'nothing new for carol'
 [ -f "$parent/carol/.moot/seen/ops.archived/carol" ] && [ ! -e "$parent/carol/.moot/seen/ops" ] && ok 'into seen/ops.archived' || no 'into seen/ops.archived'
 
-group 'link repair follows an un-archive'
-mv "$parent/carol/.moot/rooms/ops.archived" "$parent/carol/.moot/rooms/ops"
-err=$(a rooms 2>&1 >/dev/null)
-check 'a by-hand mv back is followed' "$(readlink "$parent/alice/.moot/rooms/ops")" '../../../carol/.moot/rooms/ops'
-check 'with the cursor' "$(cat "$parent/alice/.moot/seen/ops/alice" 2>/dev/null)" '20260829-100000-carol'
-check 'and says so' "$err" 'moot: rooms/ops.archived is open again, now rooms/ops'
-check 'and the room takes posts again' "$(a post --room ops -m 'back' >/dev/null && echo posted)" 'posted'
+group 'a watch started after an archive'
+pair_layout
+c create ops >/dev/null; a create board >/dev/null
+a join "$parent/carol/.moot/rooms/ops" >/dev/null
+c archive ops >/dev/null
+start_watch env MOOT_NAME= "$parent/alice/.moot/moot.sh" watch
+check 'watch repairs the link when it starts' "$(readlink "$parent/alice/.moot/rooms/ops.archived")" '../../../carol/.moot/rooms/ops.archived'
+printf 'late\n' > "$parent/carol/.moot/rooms/ops.archived/posts/20260829-091000-carol.md"
+sleep 0.6
+check 'and leaves the archived room out' "$(kill -0 "$watch_pid" 2>/dev/null && echo waiting)" 'waiting'
+printf 'new\n' > "$parent/alice/.moot/rooms/board/posts/20260829-092000-carol.md"
+wait_watch
+check 'while it hears the live one' "$rc:$(cat "$work/watch.out")" '0:board/20260829-092000-carol'
 
-group 'link repair clears an archived room that has gone'
-c archive ops >/dev/null; a rooms >/dev/null 2>&1
-rm -rf "${parent:?}/carol/.moot/rooms/ops.archived"
-err=$(a rooms 2>&1 >/dev/null)
-[ ! -e "$parent/alice/.moot/rooms/ops.archived" ] && [ ! -L "$parent/alice/.moot/rooms/ops.archived" ] && ok 'the dangling archived link is removed' || no 'the dangling archived link is removed'
-[ ! -e "$parent/alice/.moot/seen/ops.archived" ] && ok 'with its cursor' || no 'with its cursor'
-case $err in *'rooms/ops.archived has gone from its keeper'*) ok 'and says so' ;; *) no 'and says so' "$err" ;; esac
-
-group 'link repair leaves any other dangling link'
-d join "$parent/carol/.moot/rooms/dev" >/dev/null
-printf 'x\n' > "$parent/carol/.moot/rooms/dev/posts/20260829-090000-carol.md"
-d read --new >/dev/null
-mv "$parent/carol/.moot/rooms/dev" "$parent/carol/dev-away"
+group 'link repair leaves a rename whose new name is taken'
+pair_layout
+c create ops >/dev/null; d join "$parent/carol/.moot/rooms/ops" >/dev/null
+c archive ops >/dev/null
+ln -s ../../../carol/.moot/rooms/ops.archived "$parent/dave/.moot/rooms/ops.archived"
 err=$(d rooms 2>&1 >/dev/null)
-[ -L "$parent/dave/.moot/rooms/dev" ] && ok 'a live room that has gone stays linked' || no 'a live room that has gone stays linked'
-[ -f "$parent/dave/.moot/seen/dev/dave" ] && ok 'and keeps its cursor' || no 'and keeps its cursor'
-check 'and rooms reports it with the leave line' "$err" "moot: rooms/dev leads nowhere (../../../carol/.moot/rooms/dev); leave it with: $parent/dave/.moot/moot.sh leave dev"
-mv "$parent/carol/dev-away" "$parent/carol/.moot/rooms/dev"
-check 'so the room is heard again when it comes back' "$(d rooms 2>&1)" 'dev'
-ln -s ../../../ghost/.moot/rooms/gone.archived "$parent/dave/.moot/rooms/gone.archived"
-d rooms >/dev/null 2>&1
-[ -L "$parent/dave/.moot/rooms/gone.archived" ] && ok "an archived link stays when its keeper's rooms/ is not there" || no "an archived link stays when its keeper's rooms/ is not there"
-check 'and leave lets it go' "$(d leave gone.archived)" 'left rooms/gone.archived'
+[ -L "$parent/dave/.moot/rooms/ops" ] && ok 'the old link stays' || no 'the old link stays'
+case $err in *'rooms/ops leads nowhere'*) ok 'and rooms reports it' ;; *) no 'and rooms reports it' "$err" ;; esac
 
 group 'join and the two forms of a name'
 pair_layout
@@ -1458,6 +1493,7 @@ check 'join of an archived room links it under that name' "$(a join "$parent/car
 d create ops >/dev/null
 out=$(a join "$parent/dave/.moot/rooms/ops" 2>&1); rc=$?
 check 'join refuses a name whose other form is here' "$rc:$out" '1:moot: rooms/ops.archived is already here'
+check 'leave by the old name finds the archived room' "$(a leave ops)" 'left rooms/ops.archived'
 
 group 'a link another command made a moment ago is never followed'
 # A stand-in ln that acts out a second command making the same link first,
@@ -1500,22 +1536,20 @@ check 'the keeper finds it while the other has left' "$(a dm bob)" 'have rooms/d
 [ -L "$parent/bob/.moot/rooms/dm-alice-bob" ] && ok "and makes the other's link again" || no "and makes the other's link again"
 check 'a DM started from the other side lands in the same name' "$(c dm "$parent/alice")" 'started rooms/dm-alice-carol'
 [ -d "$parent/carol/.moot/rooms/dm-alice-carol" ] && [ -L "$parent/alice/.moot/rooms/dm-alice-carol" ] && ok 'kept by the side that started it' || no 'kept by the side that started it'
-a dm --as zed >/dev/null 2>&1 && no 'dm takes no --as' || ok 'dm takes no --as'
-out=$(a dm "$parent/alice" 2>&1); rc=$?
-check 'a DM with oneself is refused' "$rc" '1'
+refuses 'dm takes no --as' 'unknown option for dm' a dm --as zed
+refuses 'a DM with oneself is refused' 'needs two participants' a dm "$parent/alice"
 out=$(a dm nobody 2>&1); rc=$?
 check 'a name with no sibling folder is refused' "$rc" '1'
 case $out in *'pass its directory'*) ok 'and asks for the directory' ;; *) no 'and asks for the directory' "$out" ;; esac
 mkdir -p "$parent/empty"
-a dm "$parent/empty" >/dev/null 2>&1 && no 'a folder with no .moot/ is refused' || ok 'a folder with no .moot/ is refused'
+refuses 'a folder with no .moot/ is refused' 'no .moot/ there' a dm "$parent/empty"
 
 group 'dm and the reserved names'
 out=$(d join "$parent/alice/.moot/rooms/dm-alice-bob" 2>&1); rc=$?
 check 'a third party joining a DM is refused' "$rc" '1'
 case $out in *'direct message for two others'*) ok 'and says the DM is for its pair' ;; *) no 'and says the DM is for its pair' "$out" ;; esac
 [ ! -e "$parent/dave/.moot/rooms/dm-alice-bob" ] && ok 'and no link was made' || no 'and no link was made'
-out=$(a archive dm-alice-bob 2>&1); rc=$?
-check 'the keeper cannot archive a DM' "$rc" '1'
+refuses 'the keeper cannot archive a DM' 'never archived' a archive dm-alice-bob
 
 group 'dm on an archived DM'
 mv "$parent/alice/.moot/rooms/dm-alice-bob" "$parent/alice/.moot/rooms/dm-alice-bob.archived"
@@ -1542,6 +1576,19 @@ case $out in *'kept on both sides'*"$parent/alice/.moot/rooms/dm-alice-bob"*"$pa
 out=$(b dm alice 2>&1); rc=$?
 check 'from the other side too' "$rc" '1'
 case $out in *'kept on both sides'*) ok 'and every time' ;; *) no 'and every time' "$out" ;; esac
+
+group 'dm: the other branches'
+pair_layout
+far=$(mktemp -d "$work/far.XXXXXX"); mkdir -p "$far/zoe"; "$repo/install.sh" "$far/zoe" >/dev/null
+a dm "$far/zoe" >/dev/null
+check 'a name with no sibling folder finds a DM already here' "$(a dm zoe)" 'have rooms/dm-alice-zoe'
+a dm bob >/dev/null; b leave dm-alice-bob >/dev/null
+mv "$parent/alice/.moot/rooms/dm-alice-bob" "$parent/alice/.moot/rooms/dm-alice-bob.archived"
+refuses 'dm refuses a DM archived on the other side, with no link here' 'is archived; its keeper reopens it with: mv' b dm alice
+[ ! -e "$parent/bob/.moot/rooms/dm-alice-bob" ] && [ ! -L "$parent/bob/.moot/rooms/dm-alice-bob" ] && ok 'and makes no link' || no 'and makes no link'
+c dm alice >/dev/null
+mv "$parent/carol/.moot/rooms/dm-alice-carol" "$parent/carol/away"
+refuses 'dm refuses a link that leads nowhere' 'leads nowhere; leave it first' a dm carol
 
 group 'a DM counts as a mention'
 pair_layout
@@ -1651,7 +1698,7 @@ check 'line one of .moot/status is that line' "$(head -n 1 "$host/.moot/status")
 check 'status prints it back' "$(j status)" '20261122-093012 closing the ops run'
 printf 'by hand, no stamp\nmore lines\n' > "$host/.moot/status"
 check 'a by-hand status is read as it stands' "$(j status)" 'by hand, no stamp'
-j status -m '  ' >/dev/null 2>&1 && no 'an empty status is refused' || ok 'an empty status is refused'
+refuses 'an empty status is refused' 'empty status' j status -m '  '
 check 'status leaves no temporary file' "$(ls -A "$host/.moot" | grep -c '^\.status')" '0'
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
