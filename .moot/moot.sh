@@ -1121,8 +1121,10 @@ cmd_dm() {
   fi
   # 1. Here already. If I keep it and the other has left, link it there again.
   if [ -d "$mine" ]; then
-    if [ ! -L "$mine" ] && [ ! -e "$theirs" ] && [ ! -L "$theirs" ]; then
-      out=$(dm_link_there) || printf 'moot: %s could not link rooms/%s again: %s\n' "$them" "$room" "${out#moot: }" >&2
+    if [ ! -L "$mine" ] && ! [ "$theirs" -ef "$mine" ]; then
+      [ -L "$theirs" ] || [ ! -d "$theirs" ] || die "$room is kept on both sides: $mine and $theirs"
+      out=$(dm_link_there) || printf 'moot: %s could not link rooms/%s again (%s); it can leave its own first: %s leave %s\n' \
+        "$them" "$room" "${out#moot: }" "$their/moot.sh" "$room" >&2
     fi
     printf 'have rooms/%s\n' "$room"; return 0
   fi

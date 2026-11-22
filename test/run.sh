@@ -1512,6 +1512,21 @@ out=$(a dm bob 2>&1); rc=$?
 check 'and so does dm from the keeper' "$rc:$out" "1:$want"
 [ ! -e "$parent/alice/.moot/rooms/dm-alice-bob" ] && ok 'and nothing new is made' || no 'and nothing new is made'
 
+group 'dm has a DM only while the other side hears it'
+pair_layout
+a dm bob >/dev/null
+rm "$parent/bob/.moot/rooms/dm-alice-bob"; ln -s ../../../elsewhere/dm-alice-bob "$parent/bob/.moot/rooms/dm-alice-bob"
+err=$(a dm bob 2>&1 >/dev/null); out=$(a dm bob 2>/dev/null); rc=$?
+check "the keeper still has it while the other side's link leads nowhere" "$rc:$out" '0:have rooms/dm-alice-bob'
+case $err in *'bob could not link rooms/dm-alice-bob again'*'leave dm-alice-bob'*) ok 'and says the other side must leave its own first' ;; *) no 'and says the other side must leave its own first' "$err" ;; esac
+rm "$parent/bob/.moot/rooms/dm-alice-bob"; mkdir -p "$parent/bob/.moot/rooms/dm-alice-bob/posts"
+out=$(a dm bob 2>&1); rc=$?
+check 'a DM kept on both sides is refused' "$rc" '1'
+case $out in *'kept on both sides'*"$parent/alice/.moot/rooms/dm-alice-bob"*"$parent/bob/.moot/rooms/dm-alice-bob"*) ok 'naming both folders' ;; *) no 'naming both folders' "$out" ;; esac
+out=$(b dm alice 2>&1); rc=$?
+check 'from the other side too' "$rc" '1'
+case $out in *'kept on both sides'*) ok 'and every time' ;; *) no 'and every time' "$out" ;; esac
+
 group 'a DM counts as a mention'
 pair_layout
 a dm bob >/dev/null
