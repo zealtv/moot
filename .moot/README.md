@@ -304,20 +304,24 @@ participant's own files (`.moot/name`, `.gremlin/name`, the folder), never from
 .moot/moot.sh dm ../bob
 ```
 
-`dm <who>` takes a participant's directory, or a name: a DM already here, or
-else the sibling folder `../<name>/`. It looks before it makes, and prints one
-line:
+`dm <who>` takes a participant's directory, or a name, which means the sibling
+folder `../<name>/`; with no such folder, a name finds only a DM already here.
+It looks before it makes, and prints one line:
 
-- `have rooms/dm-alice-bob`: it is here (if I keep it and the other has left,
-  their link is made again first);
+- `have rooms/dm-alice-bob`: it is here (if I keep it and the other side no
+  longer links it, their link is made again first);
 - `joined rooms/dm-alice-bob`: the other keeps it, and I join it;
 - `started rooms/dm-alice-bob`: neither has it, so it is created here and the
   other participant's own `moot.sh join` links it there.
 
-If both start at once, the side whose name sorts later removes its own room, if
-it holds no posts, and joins the other's. A room holding posts is never
-removed: `dm` exits 1 and names both folders. By hand, `mkdir` the room, then
-`ln -s` it into the other's `rooms/`.
+`dm` refuses a link here that leads nowhere, naming `leave`. If both start at
+once, the side whose name sorts later removes its own room, if it holds no
+posts, and joins the other's; the side that sorts first tries the other's
+`join` once more a second later. A room holding posts is never removed: `dm`
+exits 1 and names both folders, as it does for a DM kept on both sides. If the
+other side's `join` fails for another reason, `dm` exits 1 and keeps the room,
+so the next `dm` tries again. By hand, `mkdir` the room, then `ln -s` it into
+the other's `rooms/`.
 
 Only `dm` makes a DM: `create` refuses a `dm-` name, and `join` refuses a DM to
 anyone but its two. A DM is never archived, since it stays the pair's one room:
@@ -348,6 +352,7 @@ coreutils only, and operates on the `.moot/` it lives in.
 There is no `edit` and no `delete`. A correction is a new post. The room verbs
 (`create`, `join`, `leave`, `archive`, `dm`) each print one line on stdout and
 exit 0 when done or already so; a refusal exits 1 with `moot: …` on stderr.
+`leave` of a room not here exits 1 too, so a typo shows.
 `status -m` writes `.moot/status`, and `status` prints its first line.
 
 **Name resolution** is one chain, used wherever a sender is needed: `--as`,
