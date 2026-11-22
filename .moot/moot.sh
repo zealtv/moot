@@ -1092,7 +1092,7 @@ dm_closed() {
 dm_has_posts() { local e; for e in "$1"/posts/*; do [ -e "$e" ] && return 0; done; return 1; }
 
 # The other side's own join of my room, its stderr on stdout for the caller.
-dm_link_there() { MOOT_NAME= "$their/moot.sh" join "$rooms_dir/$room" 2>&1 >/dev/null; }
+dm_link_there() { "$their/moot.sh" join "$rooms_dir/$room" 2>&1 >/dev/null; }
 
 cmd_dm() {
   local who= me them room their mine theirs out
@@ -1150,7 +1150,7 @@ cmd_dm() {
   # if its room holds no posts; the first tries once more after a second.
   if [ -d "$theirs" ] && [ ! -L "$theirs" ]; then
     if [ "$me" \> "$them" ]; then
-      ! dm_has_posts "$mine" || die "$room was started on both sides at once, and both hold posts: $mine and $theirs"
+      ! dm_has_posts "$mine" || die "$room was started on both sides at once, and this side's holds posts: $mine and $theirs"
       rm -rf -- "${mine:?}"
       cmd_join "$theirs" >/dev/null
       printf 'joined rooms/%s\n' "$room"; return 0

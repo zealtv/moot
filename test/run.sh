@@ -1635,6 +1635,7 @@ pair_layout
 race_wrapper "$parent/alice" posts-there dm-alice-bob "$parent/bob/.moot/rooms/dm-alice-bob"
 out=$(b dm alice 2>&1); rc=$?
 check 'the side that would yield keeps a room that holds posts' "$rc" '1'
+case $out in *"this side's holds posts"*) ok 'and says it is this side that holds them' ;; *) no 'and says it is this side that holds them' "$out" ;; esac
 [ -f "$parent/bob/.moot/rooms/dm-alice-bob/posts/20260829-090000-y.md" ] && ok 'and its post' || no 'and its post'
 
 # ---------------------------------------------------------------- status
