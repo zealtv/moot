@@ -44,7 +44,12 @@ usage() {
   cat <<'USAGE'
 moot — a directory of messages
 
+  moot.sh create <room>
   moot.sh join <path-to-room>
+  moot.sh leave <room>
+  moot.sh archive <room>
+  moot.sh dm <dir-or-name>
+  moot.sh status [-m <text>]
   moot.sh rooms
   moot.sh post [--json] [--as <name>] [--room <name>] [-m <text> | -f <file> | -]
   moot.sh read [--room <name>] [--since <post-id>] [--tail <n>]
@@ -56,11 +61,13 @@ Markdown. Posts are immutable: there is no edit and no delete. A correction is
 a new post.
 
 A room lives with its keeper, as a real folder in the keeper's .moot/rooms/.
-join makes a link to a room someone else keeps; it never makes a room. To keep
-one yourself: mkdir -p .moot/rooms/<room>/posts
+create makes one here (or: mkdir -p .moot/rooms/<room>/posts); join links to
+one someone else keeps, and never makes one; leave removes a link. archive
+closes a room you keep as rooms/<room>.archived: it still reads, and posting is
+closed. dm finds or starts the one room, dm-<a>-<b>, for you and another.
 
-post and read are aimed at one room; read --new and watch cover every room here
-unless --room narrows them. read --new prints every post since my cursor (only
+post and read are aimed at one room; read --new and watch cover every live room
+here unless --room narrows them. read --new prints every post since my cursor (only
 the ones that mention me with --mentions, or written to <dir> with --deliver)
 and moves the cursor. watch waits for a new post from someone else, prints
 room/id, and exits; it never moves the cursor. watch --room (repeatable) hears
@@ -77,8 +84,9 @@ USAGE
 # named after the repo on every machine.
 
 moot_name() {
-  [ -r "$moot_dir/name" ] || return 1
-  head -n 1 -- "$moot_dir/name" | tr -d '[:space:]'
+  local file="${1:-$moot_dir}/name"
+  [ -r "$file" ] || return 1
+  head -n 1 -- "$file" | tr -d '[:space:]'
 }
 
 # .gremlin/name is a key=value file (name=alice, source=generated), so take the
@@ -89,7 +97,7 @@ moot_name() {
 # some ancestor can be picked up by accident. A .moot/ with no .gremlin/ beside
 # it is not part of a gremlin, and the rest of the chain is the honest answer.
 gremlin_name() {
-  local file="$moot_dir/../.gremlin/name" value
+  local file="${1:-$moot_dir}/../.gremlin/name" value
   [ -r "$file" ] || return 1
   value=$(sed -n 's/^name=//p' "$file" | head -n 1 | tr -d '[:space:]')
   [ -n "$value" ] || value=$(head -n 1 -- "$file" | tr -d '[:space:]')
@@ -106,20 +114,19 @@ check_segment() {
   esac
 }
 
-resolve_name() {
-  local as=${1:-} name=
-  if [ -n "$as" ]; then
-    name=$as
-  elif [ -n "${MOOT_NAME:-}" ]; then
-    name=$MOOT_NAME
-  elif name=$(moot_name) && [ -n "$name" ]; then
+# The name a .moot/ gives itself from its own files, with no --as or
+# $MOOT_NAME: .moot/name, the sibling .gremlin/name, then its folder. Both sides
+# of a DM are named this way, so both compute the same room.
+own_name() {
+  local dir=${1:-$moot_dir} name=
+  if name=$(moot_name "$dir") && [ -n "$name" ]; then
     :
-  elif name=$(gremlin_name) && [ -n "$name" ]; then
+  elif name=$(gremlin_name "$dir") && [ -n "$name" ]; then
     :
   else
     # The host folder, read from the script's own location like .gremlin/name,
     # so the working directory never comes into it.
-    name=$(cd -- "$moot_dir/.." && pwd); name=${name##*/}
+    name=$(cd -- "$dir/.." && pwd); name=${name##*/}
     case $name in
       *[!A-Za-z0-9._-]* | .* | '')
         die "folder name '$name' is not a filename-safe sender; write one to .moot/name or pass --as <name>" ;;
@@ -129,32 +136,65 @@ resolve_name() {
   printf '%s' "$name"
 }
 
+resolve_name() {
+  local as=${1:-} name=
+  if [ -n "$as" ]; then
+    name=$as
+  elif [ -n "${MOOT_NAME:-}" ]; then
+    name=$MOOT_NAME
+  else
+    name=$(own_name) || exit 1
+  fi
+  check_segment 'sender name' "$name"
+  printf '%s' "$name"
+}
+
 # ---------------------------------------------------------------- room resolution
 
-# Rooms here, lexically: whatever is a folder under rooms/, real or linked. A
-# room that arrived by copy or rsync is heard by being there.
+# Rooms here: whatever is a folder under rooms/, real or linked (one that arrived
+# by copy is heard by being there). Live rooms in name order, then archived ones,
+# which `subscribed_rooms live` leaves out.
 subscribed_rooms() {
-  local entry base
+  local want=${1:-all} entry base pass
   [ -d "$rooms_dir" ] || return 0
-  for entry in "$rooms_dir"/*; do
-    [ -d "$entry" ] || continue
-    base=${entry##*/}
-    case $base in .*) continue ;; esac
-    printf '%s\n' "$base"
+  for pass in live archived; do
+    [ "$pass" = live ] || [ "$want" = all ] || return 0
+    for entry in "$rooms_dir"/*; do
+      [ -d "$entry" ] || continue
+      base=${entry##*/}
+      case $base in
+        .*) continue ;;
+        *.archived) [ "$pass" = archived ] || continue ;;
+        *) [ "$pass" = live ] || continue ;;
+      esac
+      printf '%s\n' "$base"
+    done
   done
 }
 
+is_archived() { case $1 in *.archived) return 0 ;; esac; return 1; }
+
 room_hint() { printf 'keep one with: mkdir -p .moot/rooms/<room>/posts; hear one with: %s join <path-to-room>' "$0"; }
 
+# The room a name means, left in $room: itself, or once its keeper has closed it
+# its archived form, so --room ops still finds ops.archived.
+named_room() {
+  room=$1
+  check_segment 'room name' "$room"
+  if [ ! -e "$rooms_dir/$room" ] && [ ! -L "$rooms_dir/$room" ] && [ -d "$rooms_dir/$room.archived" ]; then
+    room=$room.archived
+  fi
+}
+
 # Resolve the room a post or plain read is aimed at, and point posts_dir at it:
-# --room, or the sole room here. Several rooms and none chosen is an error that
+# --room, or the sole live room here. Several and none chosen is an error that
 # lists them.
 use_room() {
   local want=${1:-} rooms=() r
   if [ -n "$want" ]; then
-    room=$want
+    named_room "$want"
   else
-    while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms)
+    while IFS= read -r r; do rooms+=("$r"); done < <(subscribed_rooms live)
     case ${#rooms[@]} in
       0) die "no rooms here yet; $(room_hint)" ;;
       1) room=${rooms[0]} ;;
@@ -165,21 +205,58 @@ use_room() {
         exit 1 ;;
     esac
   fi
-  check_segment 'room name' "$room"
   room_dir="$rooms_dir/$room"
   posts_dir="$room_dir/posts"
 }
 
-# The rooms a sweep covers: --room's one, or every room here. Called in the main
-# shell first, so that a bad --room stops the command (a die inside a process
-# substitution would not).
+# The rooms a pass covers: --room's one, or every live room here. Called in the
+# main shell first, so that a bad --room stops the command (a die inside a
+# process substitution would not); it leaves the room found in $room.
 check_room_opt() {
-  [ -n "$1" ] || return 0
-  check_segment 'room name' "$1"
-  [ -d "$rooms_dir/$1" ] || die "no room $1 here; $(room_hint)"
+  named_room "$1"
+  [ -d "$rooms_dir/$room" ] || die "no room $1 here; $(room_hint)"
 }
-sweep_rooms() {
-  if [ -n "$1" ]; then printf '%s\n' "$1"; else subscribed_rooms; fi
+pass_rooms() {
+  if [ -n "$1" ]; then printf '%s\n' "$1"; else subscribed_rooms live; fi
+}
+
+# ---------------------------------------------------------------- link repair
+
+# Every command but help starts here (README, "Link repair"): for each link in
+# rooms/ that leads nowhere, follow the one rename with its cursor folder, or
+# drop a link to an archived room that has gone, or leave it for rooms to report.
+# Built-in tests, and readlink only for a link that dangles, so it is cheap.
+repair_links() {
+  local entry name target new to there
+  [ -d "$rooms_dir" ] || return 0
+  for entry in "$rooms_dir"/*; do
+    [ -L "$entry" ] && [ ! -e "$entry" ] || continue
+    name=${entry##*/}
+    target=$(readlink -- "$entry") || continue
+    target=${target%/}
+    if is_archived "$name"; then new=${name%.archived}; else new=$name.archived; fi
+    if is_archived "$target"; then to=${target%.archived}; else to=$target.archived; fi
+    case $to in /*) there=$to ;; *) there=$rooms_dir/$to ;; esac
+    if [ -d "$there/posts" ]; then
+      [ ! -e "$rooms_dir/$new" ] && [ ! -L "$rooms_dir/$new" ] || continue
+      ln -s -- "$to" "$rooms_dir/$new" 2>/dev/null || [ -L "$rooms_dir/$new" ] || continue
+      rm -f -- "$entry"
+      if [ -d "$seen_dir/$name" ] && [ ! -e "$seen_dir/$new" ]; then
+        mv -- "$seen_dir/$name" "$seen_dir/$new" 2>/dev/null || true
+      fi
+      if is_archived "$new"; then
+        printf 'moot: rooms/%s is archived, now rooms/%s (read --new --room %s shows the rest)\n' "$name" "$new" "$new" >&2
+      else
+        printf 'moot: rooms/%s is open again, now rooms/%s\n' "$name" "$new" >&2
+      fi
+    elif is_archived "$name"; then
+      case $target in /*) there=$target ;; *) there=$rooms_dir/$target ;; esac
+      [ -d "${there%/*}" ] || continue
+      rm -f -- "$entry"
+      rm -rf -- "${seen_dir:?}/$name"
+      printf 'moot: rooms/%s has gone from its keeper; removed the link and its cursor\n' "$name" >&2
+    fi
+  done
 }
 
 # ---------------------------------------------------------------- post listing
@@ -216,20 +293,20 @@ post_body_path() {
   fi
 }
 
-# What a sweep (read --new) may read: stamped ids in order, leaving out
+# What a pass (read --new) may read: stamped ids in order, leaving out
 # any stamped in the current UTC second or later. The cursor is the newest id
-# scanned, so a sweep that moved it onto the current second would never show a
+# scanned, so a pass that moved it onto the current second would never show a
 # post that lands later in that same second under a name sorting lower (ben
-# after carol). Such a post waits for the next sweep, and so does one stamped
-# by a clock ahead of mine. $sweep_now is read once per sweep. Ids that are not
-# stamps are not swept: sorting after every stamp, one would park the cursor
+# after carol). Such a post waits for the next pass, and so does one stamped
+# by a clock ahead of mine. $pass_now is read once per pass. Ids that are not
+# stamps are left out: sorting after every stamp, one would park the cursor
 # past every post still to come.
-sweep_now=
+pass_now=
 settled_ids() {
   local id
   while IFS= read -r id; do
     is_stamp_id "$id" || continue
-    [ "${id:0:15}" \< "$sweep_now" ] || continue
+    [ "${id:0:15}" \< "$pass_now" ] || continue
     printf '%s\n' "$id"
   done < <(post_ids)
 }
@@ -251,7 +328,7 @@ relative_path() {
 # the keeper's .moot/rooms/; everyone else holds a link to it. join never makes
 # a room, so a typo cannot make a private one that nobody else reads.
 cmd_join() {
-  local target= name= real rooms_real rel link
+  local target= name= real rooms_real rel link me
   while [ $# -gt 0 ]; do
     case $1 in
       -h|--help) usage; return 0 ;;
@@ -279,20 +356,109 @@ cmd_join() {
   elif [ -e "$link" ]; then
     die "rooms/$name is a room kept here (a real folder); join links to rooms others keep"
   fi
+  name_free "$name"
+  # A DM is for its pair: the joiner must be one of its two names.
+  case ${name%.archived} in
+    dm-*)
+      me=$(own_name) || exit 1
+      case ${name%.archived} in
+        "dm-$me-"?* | "dm-"?*"-$me") ;;
+        *) die "rooms/$name is a direct message for two others; only its pair joins it" ;;
+      esac ;;
+  esac
 
   rel=$(relative_path "$rooms_real" "$real")
   ln -s -- "$rel" "$link"
   printf 'joined rooms/%s -> %s\n' "$name" "$rel"
 }
 
+# ops and ops.archived are one name: refuse either while the other is here.
+name_free() {
+  local n other
+  if is_archived "$1"; then other=${1%.archived}; else other=$1.archived; fi
+  for n in "$1" "$other"; do
+    if [ -e "$rooms_dir/$n" ] || [ -L "$rooms_dir/$n" ]; then die "rooms/$n is already here"; fi
+  done
+}
+
+# The one argument a room verb takes.
+one_room() {
+  local verb=$1; shift
+  case ${1:-} in
+    -h|--help) usage; exit 0 ;;
+    -*) die "unknown option for $verb: $1" ;;
+    '') die "$verb needs a room" ;;
+  esac
+  [ $# -eq 1 ] || die "$verb takes one room"
+  arg=$1
+}
+
+cmd_create() {
+  local arg; one_room create "$@"
+  check_segment 'room name' "$arg"
+  case $arg in
+    dm-*) die "dm- names are kept for direct messages; start one with: $0 dm <who>" ;;
+    *.archived) die "names ending .archived are kept for archived rooms" ;;
+  esac
+  name_free "$arg"
+  mkdir -p -- "$rooms_dir/$arg/posts"
+  : > "$rooms_dir/$arg/posts/.gitkeep"
+  printf 'created rooms/%s\n' "$arg"
+}
+
+# leave removes a link and its cursor, and never a real folder.
+cmd_leave() {
+  local arg; one_room leave "$@"
+  named_room "$arg"
+  if [ -L "$rooms_dir/$room" ]; then
+    rm -f -- "$rooms_dir/$room"
+    rm -rf -- "${seen_dir:?}/$room"
+    printf 'left rooms/%s\n' "$room"
+  elif [ -e "$rooms_dir/$room" ]; then
+    die "rooms/$room is kept here (a real folder); leave removes only a link"
+  else
+    die "no room $room here"
+  fi
+}
+
+# archive renames a room kept here, and its own cursor folder with it. Hearers'
+# links follow at their next command, by link repair.
+cmd_archive() {
+  local arg dir; one_room archive "$@"
+  named_room "$arg"
+  dir="$rooms_dir/$room"
+  case ${room%.archived} in dm-*) die "rooms/$room is a direct message, and a DM is never archived; its hearer can leave it" ;; esac
+  if [ -L "$dir" ] && [ ! -e "$dir" ]; then
+    die "rooms/$room leads nowhere; leave it with: $0 leave $room"
+  elif [ ! -d "$dir" ]; then
+    die "no room $room here"
+  elif is_archived "$room"; then
+    printf 'already archived rooms/%s\n' "$room"; return 0
+  elif [ -L "$dir" ]; then
+    die "rooms/$room is heard here, not kept; only its keeper archives it, at $(cd -P -- "$dir" && pwd -P)"
+  fi
+  [ ! -e "$dir.archived" ] && [ ! -L "$dir.archived" ] || die "rooms/$room.archived is already here"
+  mv -- "$dir" "$dir.archived"
+  if [ -d "$seen_dir/$room" ] && [ ! -e "$seen_dir/$room.archived" ]; then
+    mv -- "$seen_dir/$room" "$seen_dir/$room.archived"
+  fi
+  printf 'archived rooms/%s.archived\n' "$room"
+}
+
 cmd_rooms() {
-  local r any=0
+  local r any=0 entry
   [ "${1:-}" = -h ] || [ "${1:-}" = --help ] && { usage; return 0; }
   [ $# -eq 0 ] || die "rooms takes no arguments"
   while IFS= read -r r; do
     any=1
     printf '%s\n' "$r"
   done < <(subscribed_rooms)
+  # What link repair left alone: where each leads, and how to let it go.
+  for entry in "$rooms_dir"/*; do
+    [ -L "$entry" ] && [ ! -e "$entry" ] || continue
+    printf 'moot: rooms/%s leads nowhere (%s); leave it with: %s leave %s\n' \
+      "${entry##*/}" "$(readlink -- "$entry")" "$0" "${entry##*/}" >&2
+  done
   [ "$any" = 1 ] || printf 'no rooms here yet: keep one with mkdir -p .moot/rooms/<room>/posts, or hear one with %s join <path-to-room>\n' "$0"
 }
 
@@ -324,6 +490,7 @@ cmd_post() {
 
   use_room "$room_opt"
   [ -d "$posts_dir" ] || die "no room $room here; $(room_hint)"
+  ! is_archived "$room" || die "${room%.archived} is archived; posting is closed"
 
   local sender; sender=$(resolve_name "$as")
   stamp=$(date -u +%Y%m%d-%H%M%S)
@@ -392,8 +559,9 @@ render_body() {
 }
 
 # Does this id follow the filename grammar, <8 digits>-<6 digits>-<sender>? Only
-# such ids have a time to show, and only such ids are swept by read --new; anything else in posts/ (a stray README.md, say) is still listed
-# by plain read, under its own name.
+# such ids have a time to show, and only such ids are read by a pass of read
+# --new; anything else in posts/ (a stray README.md, say) is still listed by
+# plain read, under its own name.
 is_stamp_id() {
   case $1 in
     [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-?*) return 0 ;;
@@ -493,8 +661,8 @@ cursor_put() {
 read_new() {
   local as=$1 room_opt=$2 mentions=$3 deliver=$4 r me id cursor newest
   local shown=0 rooms=()
-  check_room_opt "$room_opt"
-  while IFS= read -r r; do rooms+=("$r"); done < <(sweep_rooms "$room_opt")
+  if [ -n "$room_opt" ]; then check_room_opt "$room_opt"; room_opt=$room; fi
+  while IFS= read -r r; do rooms+=("$r"); done < <(pass_rooms "$room_opt")
   me=$(resolve_name "$as")
 
   if [ -n "$deliver" ]; then
@@ -504,7 +672,7 @@ read_new() {
   else
     init_colour
   fi
-  sweep_now=$(date -u +%Y%m%d-%H%M%S)
+  pass_now=$(date -u +%Y%m%d-%H%M%S)
 
   local head_on='' head_off=''
   if [ "$colour_on" = 1 ]; then head_on=$(printf '\033[1m'); head_off=$(printf '\033[0m'); fi
@@ -521,7 +689,7 @@ read_new() {
     newest=${new[${#new[@]}-1]}
 
     for id in "${new[@]}"; do
-      if [ "$mentions" = 0 ] || post_mentions_me "$(post_body_path "$id")" "$me"; then picked+=("$id"); fi
+      if [ "$mentions" = 0 ] || counts_for_me "$id" "$me"; then picked+=("$id"); fi
     done
 
     if [ -n "$deliver" ]; then
@@ -536,7 +704,7 @@ read_new() {
     fi
 
     # A room reachable read-only is a normal way to run. It still reads, the
-    # sweep goes on to the next room, and delivered filenames carry the room and
+    # pass goes on to the next room, and delivered filenames carry the room and
     # post id, so a repeat delivers nothing twice.
     if ! cursor_put "$room" "$me" "$newest"; then
       printf 'moot: cannot write %s (read-only room); the next --new will repeat these\n' \
@@ -634,6 +802,14 @@ post_mentions_me() {
     [ "$m" = all ] && return 0
   done < <(mentions_in "$body")
   return 1
+}
+
+# Does post <id> in $room count as a mention of me? In a dm- room every post from
+# the other side does, so a DM always reaches its reader; elsewhere, an @ of me
+# or @all.
+counts_for_me() {
+  case ${room%.archived} in dm-*) id_is_from "$1" "$2" || return 0 ;; esac
+  post_mentions_me "$(post_body_path "$1")" "$2"
 }
 
 # A delivered item carries the room it came from, the path to it, and its own
@@ -797,14 +973,15 @@ cmd_watch() {
   # Which rooms are heard how. With no --room, every room, and --mentions
   # narrows all of them to mentions. With --room, those rooms fully, and
   # --mentions adds mentions from every other room; without it the others are
-  # not heard. The room list is read again on every poll, so a room joined
-  # while the watch runs is heard from its next poll.
+  # not heard. Archived rooms are heard only when --room names them. The room
+  # list is read again on every poll, so a room joined while the watch runs is
+  # heard from its next poll.
   local seen_opt=
   for r in ${full[@]+"${full[@]}"}; do
-    check_room_opt "$r"
+    check_room_opt "$r"; r=$room
     case " $seen_opt " in *" $r "*) ;; *) seen_opt="$seen_opt $r" ;; esac
   done
-  [ -n "$(subscribed_rooms)" ] || die "no rooms here to watch"
+  [ -n "$(subscribed_rooms live)$seen_opt" ] || die "no rooms here to watch"
 
   local me; me=$(resolve_name "$as")
 
@@ -817,11 +994,12 @@ cmd_watch() {
   trap 'exit 143' TERM
 
   # Where each room starts: the cursor, so a post that landed after the last
-  # read --new still fires; with no cursor yet, the newest post, so a first watch
-  # doesn't fire on the whole history. A room that appears later starts the same
-  # way. Starting paused is an unpause later.
+  # read --new still fires; with no cursor yet, a room here at start begins at
+  # its newest post, so a first watch doesn't fire on the whole history. A room
+  # that appears later, with no cursor, starts from nothing, so the first post
+  # of a new DM fires. Starting paused is an unpause later.
   # Parallel arrays, not an associative one: bash 3 has none.
-  local known=() base=() k idx only paused=0 now
+  local known=() base=() k idx only paused=0 now first=1
   [ -e "$pause_file" ] && paused=1
 
   local hits=()
@@ -835,6 +1013,7 @@ cmd_watch() {
     fi
     # List the rooms afresh and start any new one.
     while IFS= read -r r; do
+      if is_archived "$r"; then case " $seen_opt " in *" $r "*) ;; *) continue ;; esac; fi
       idx=
       for k in "${!known[@]}"; do [ "${known[$k]}" = "$r" ] && idx=$k; done
       [ -z "$idx" ] || continue
@@ -842,8 +1021,9 @@ cmd_watch() {
       idx=${#known[@]}
       known[$idx]=$r
       base[$idx]=$(cursor_get "$room" "$me")
-      [ -n "${base[$idx]}" ] || base[$idx]=$(newest_id)
+      [ -n "${base[$idx]}" ] || [ "$first" = 0 ] || base[$idx]=$(newest_id)
     done < <(subscribed_rooms)
+    first=0
     if [ -e "$pause_file" ]; then
       paused=1
     else
@@ -867,7 +1047,7 @@ cmd_watch() {
           [ -z "${base[$i]}" ] || [ "$id" \> "${base[$i]}" ] || continue
           id_is_from "$id" "$me" && continue
           if [ -n "$only" ]; then
-            post_mentions_me "$(post_body_path "$id")" "$me" || continue
+            counts_for_me "$id" "$me" || continue
           fi
           hits+=("$room/$id")
         done < <(post_ids)
@@ -883,10 +1063,129 @@ cmd_watch() {
   for item in "${hits[@]}"; do printf '%s\n' "$item"; done
 }
 
+# ---------------------------------------------------------------- direct messages
+
+# A DM is the one room for a pair, dm-<a>-<b>, the two names in byte order, each
+# from that side's own files. The starter keeps it; the other's own script links
+# it there, so each script still writes only its own .moot/.
+
+dm_room() { if [ "$1" \< "$2" ]; then printf 'dm-%s-%s' "$1" "$2"; else printf 'dm-%s-%s' "$2" "$1"; fi; }
+
+# Refuse a DM closed by hand in <rooms dir>, naming the mv that reopens it.
+dm_closed() {
+  local keeper
+  [ -d "$1/$2.archived" ] || return 0
+  keeper=$(cd -P -- "$1/$2.archived/.." && pwd -P)
+  die "$2 is archived; its keeper reopens it with: mv $keeper/$2.archived $keeper/$2"
+}
+
+dm_has_posts() { local e; for e in "$1"/posts/*; do [ -e "$e" ] && return 0; done; return 1; }
+
+# The other side's own join of my room, its stderr on stdout for the caller.
+dm_link_there() { MOOT_NAME= "$their/moot.sh" join "$rooms_dir/$room" 2>&1 >/dev/null; }
+
+cmd_dm() {
+  local who= me them room their mine theirs out
+  case ${1:-} in -h|--help) usage; return 0 ;; -*) die "unknown option for dm: $1" ;; esac
+  [ $# -eq 1 ] || die "dm takes one participant: its directory, or a sibling folder's name"
+  who=$1
+  me=$(own_name) || exit 1
+
+  # A name: a DM already here, or else the sibling folder of that name.
+  case $who in
+    */* | . | ..) their=$who ;;
+    *)
+      check_segment 'participant name' "$who"
+      their=$(cd -- "$moot_dir/../.." && pwd)/$who
+      if [ ! -d "$their/.moot" ]; then
+        room=$(dm_room "$me" "$who")
+        [ ! -d "$rooms_dir/$room" ] || { printf 'have rooms/%s\n' "$room"; return 0; }
+        dm_closed "$rooms_dir" "$room"
+        die "no participant $who beside this one; pass its directory: $0 dm <dir>"
+      fi ;;
+  esac
+  [ -d "$their/.moot" ] || die "no participant at $who (no .moot/ there)"
+  their=$(cd -- "$their/.moot" && pwd)
+  [ -x "$their/moot.sh" ] || die "no moot.sh in $their; install moot there first"
+  ! [ "$their" -ef "$moot_dir" ] || die "a DM needs two participants; $who is this one"
+  them=$(own_name "$their") || exit 1
+  [ "$them" != "$me" ] || die "a DM needs two names; both sides are $me"
+  room=$(dm_room "$me" "$them")
+  mine="$rooms_dir/$room"; theirs="$their/rooms/$room"
+
+  dm_closed "$rooms_dir" "$room"
+  dm_closed "$their/rooms" "$room"
+  if [ -L "$mine" ] && [ ! -e "$mine" ]; then
+    die "rooms/$room leads nowhere; leave it first: $0 leave $room"
+  fi
+  # 1. Here already. If I keep it and the other has left, link it there again.
+  if [ -d "$mine" ]; then
+    if [ ! -L "$mine" ] && [ ! -e "$theirs" ] && [ ! -L "$theirs" ]; then
+      out=$(dm_link_there) || printf 'moot: %s could not link rooms/%s again: %s\n' "$them" "$room" "${out#moot: }" >&2
+    fi
+    printf 'have rooms/%s\n' "$room"; return 0
+  fi
+  # 2. The other keeps it: join it.
+  if [ -d "$theirs" ]; then
+    cmd_join "$theirs" >/dev/null
+    printf 'joined rooms/%s\n' "$room"; return 0
+  fi
+  # 3. Neither has it: start it here, and the other's script links it there.
+  mkdir -p -- "$mine/posts"
+  : > "$mine/posts/.gitkeep"
+  if out=$(dm_link_there); then printf 'started rooms/%s\n' "$room"; return 0; fi
+  # Both started at once, so each holds a real folder. The later name yields
+  # if its room holds no posts; the first tries once more after a second.
+  if [ -d "$theirs" ] && [ ! -L "$theirs" ]; then
+    if [ "$me" \> "$them" ]; then
+      ! dm_has_posts "$mine" || die "$room was started on both sides at once, and both hold posts: $mine and $theirs"
+      rm -rf -- "${mine:?}"
+      cmd_join "$theirs" >/dev/null
+      printf 'joined rooms/%s\n' "$room"; return 0
+    fi
+    sleep 1
+    if out=$(dm_link_there); then printf 'started rooms/%s\n' "$room"; return 0; fi
+    die "$room was started on both sides at once: $mine and $theirs"
+  fi
+  die "started rooms/$room here, but $them could not join it: ${out#moot: }"
+}
+
+# ---------------------------------------------------------------- status
+
+# .moot/status, this participant's own: line one is <UTC stamp> <text>. With -m,
+# write it (beside, then renamed into place); either way print line one.
+cmd_status() {
+  local text= have=0 file="$moot_dir/status"
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -m) [ $# -ge 2 ] || die "-m needs text"; text=$2; have=1; shift 2 ;;
+      -h|--help) usage; return 0 ;;
+      *) die "unknown option for status: $1" ;;
+    esac
+  done
+  if [ "$have" = 1 ]; then
+    [ -n "${text//[[:space:]]/}" ] || die "refusing to write an empty status"
+    printf '%s %s\n' "$(date -u +%Y%m%d-%H%M%S)" "$text" > "$moot_dir/.status.$$"
+    mv -f -- "$moot_dir/.status.$$" "$file"
+  fi
+  if [ -r "$file" ]; then
+    head -n 1 -- "$file"
+  else
+    printf 'moot: no status here yet; set one with: %s status -m <text>\n' "$0" >&2
+  fi
+}
+
 # ---------------------------------------------------------------- dispatch
 
+case ${1:-help} in help|-h|--help) ;; *) repair_links ;; esac
+
 case ${1:-help} in
+  create) shift; cmd_create "$@" ;;
   join) shift; cmd_join "$@" ;;
+  leave) shift; cmd_leave "$@" ;;
+  archive) shift; cmd_archive "$@" ;;
+  dm) shift; cmd_dm "$@" ;;
+  status) shift; cmd_status "$@" ;;
   rooms) shift; cmd_rooms "$@" ;;
   post) shift; cmd_post "$@" ;;
   read) shift; cmd_read "$@" ;;
