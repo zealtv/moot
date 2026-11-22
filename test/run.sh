@@ -61,7 +61,7 @@ check 'a participant starts with no rooms' "$("$host/.moot/moot.sh" rooms | grep
 "$host/.moot/moot.sh" init >/dev/null 2>&1 && no 'there is no init verb' || ok 'there is no init verb'
 "$host/.moot/moot.sh" subscribe x >/dev/null 2>&1 && no 'there is no subscribe verb' || ok 'there is no subscribe verb'
 out=$("$host/.moot/moot.sh" post --as ben -m 'x' 2>&1 >/dev/null)
-case $out in *'no rooms here yet'*'mkdir -p'*'join'*) ok 'post with no rooms says how to keep or hear one' ;; *) no 'post with no rooms says how to keep or hear one' "$out" ;; esac
+case $out in *'no rooms here yet'*'create <room>'*'join'*) ok 'post with no rooms says how to keep or hear one' ;; *) no 'post with no rooms says how to keep or hear one' "$out" ;; esac
 
 group 'a room you keep'
 room=$(new_room)
@@ -115,7 +115,7 @@ group 'join only ever links'
 before=$(ls -A "$parent/alice/.moot/rooms" | tr '\n' ' ')
 out=$(a join runs 2>&1); rc=$?
 check 'join of a bare name that is no room fails' "$rc" '1'
-case $out in *"'runs' is not a room"*'mkdir -p'*) ok 'and says how to keep a room instead' ;; *) no 'and says how to keep a room instead' "$out" ;; esac
+case $out in *"'runs' is not a room"*'create <room>'*) ok 'and says how to keep a room instead' ;; *) no 'and says how to keep a room instead' "$out" ;; esac
 check 'and makes nothing' "$(ls -A "$parent/alice/.moot/rooms" | tr '\n' ' ')" "$before"
 mkdir -p "$parent/not-a-room"
 a join "$parent/not-a-room" >/dev/null 2>&1 && no 'a folder without posts/ is refused' || ok 'a folder without posts/ is refused'
@@ -713,7 +713,7 @@ check 'install is repeatable' "$(ls -A "$host/.moot" | wc -l | tr -d ' ')" '4'
 # is tested under 'the .gitignore pair').
 hint=$("$repo/install.sh" "$host")
 case $hint in *'join <path-to-room>'*) ok 'install hints at join <path-to-room>' ;; *) no 'install hints at join <path-to-room>' "$hint" ;; esac
-case $hint in *'mkdir -p'*'<room>/posts'*) ok 'and at keeping a room with mkdir' ;; *) no 'and at keeping a room with mkdir' "$hint" ;; esac
+case $hint in *'moot.sh create <room>'*) ok 'and at keeping a room with create' ;; *) no 'and at keeping a room with create' "$hint" ;; esac
 [ ! -e "$host/.gitignore" ] && ok 'install writes no .gitignore in the host' || no 'install writes no .gitignore in the host'
 
 # Run through a symlink, install still finds the files beside the real script,

@@ -18,7 +18,7 @@ Keep a room and post:
 
 ```sh
 cd my-project
-mkdir -p .moot/rooms/board/posts
+./.moot/moot.sh create board
 ./.moot/moot.sh post --as alice -m "Board is up. Post away."
 ```
 

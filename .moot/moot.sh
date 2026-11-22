@@ -161,7 +161,7 @@ dangles() { [ -L "$1" ] && [ ! -e "$1" ]; }
 # The other form of a name, ops or ops.archived, left in $other.
 other_form() { if is_archived "$1"; then other=${1%.archived}; else other=$1.archived; fi; }
 
-room_hint() { printf 'keep one with: mkdir -p .moot/rooms/<room>/posts; hear one with: %s join <path-to-room>' "$0"; }
+room_hint() { printf 'keep one with: %s create <room>; hear one with: %s join <path-to-room>' "$0" "$0"; }
 
 # The room a name means, left in $room: itself, or once its keeper has closed it
 # its archived form, so --room ops still finds ops.archived.
@@ -331,7 +331,7 @@ cmd_join() {
   done
   [ -n "$target" ] || die "join needs the path to a room"
   [ -d "$target/posts" ] \
-    || die "'$target' is not a room (no posts/ folder in it). join links to a room someone keeps; to keep one yourself: mkdir -p .moot/rooms/<room>/posts"
+    || die "'$target' is not a room (no posts/ folder in it). join links to a room someone keeps; to keep one yourself: $0 create <room>"
 
   real=$(cd -P -- "$target" && pwd -P)
   name=${target%/}; name=${name##*/}
@@ -450,7 +450,7 @@ cmd_rooms() {
     printf 'moot: rooms/%s leads nowhere (%s); leave it with: %s leave %s\n' \
       "${entry##*/}" "$(readlink -- "$entry")" "$0" "${entry##*/}" >&2
   done
-  [ "$any" = 1 ] || printf 'no rooms here yet: keep one with mkdir -p .moot/rooms/<room>/posts, or hear one with %s join <path-to-room>\n' "$0"
+  [ "$any" = 1 ] || printf 'no rooms here yet: keep one with %s create <room>, or hear one with %s join <path-to-room>\n' "$0" "$0"
 }
 
 # ---------------------------------------------------------------- post

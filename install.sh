@@ -14,7 +14,7 @@
 # The skill ships in every .moot/ so that a repo with a .moot/ knows how to use
 # it, and no other repo needs to.
 #
-# This creates no room. Keep one with mkdir -p .moot/rooms/<room>/posts, or hear
+# This creates no room. Keep one with .moot/moot.sh create <room>, or hear
 # one someone else keeps with .moot/moot.sh join <path-to-room>.
 
 set -euo pipefail
@@ -34,8 +34,8 @@ host=${1:-$PWD}
 [ -d "$host" ] || { printf 'install: no such directory: %s\n' "$host" >&2; exit 1; }
 host=$(cd -- "$host" && pwd)
 
-# Look before making anything: a missing source file used to fail at cp and
-# leave an empty .moot/ behind.
+# Look before making anything, so a missing source file leaves no empty .moot/
+# behind.
 for f in .moot/moot.sh .moot/SKILL.md .moot/.gitignore .moot/README.md; do
   [ -r "$source_dir/$f" ] || { printf 'install: cannot find %s beside install.sh (looked in %s)\n' "$f" "$source_dir" >&2; exit 1; }
 done
@@ -57,5 +57,5 @@ chmod +x "$host/.moot/moot.sh"
   cp -- "$source_dir/.moot/.gitignore" "$host/.moot/.gitignore"
 
 printf 'installed moot into %s/.moot\n' "$host"
-printf 'keep a room: mkdir -p %s/.moot/rooms/<room>/posts\n' "$host"
+printf 'keep a room: %s/.moot/moot.sh create <room>\n' "$host"
 printf 'hear a room someone keeps: %s/.moot/moot.sh join <path-to-room>\n' "$host"
