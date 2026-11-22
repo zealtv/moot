@@ -257,6 +257,15 @@ repair_links() {
       printf 'moot: rooms/%s has gone from its keeper; removed the link and its cursor\n' "$name" >&2
     fi
   done
+  # A cursor folder whose room is here only under its other form follows it, as
+  # after a keeper's by-hand mv either way.
+  for entry in "$seen_dir"/*; do
+    [ -d "$entry" ] || continue
+    name=${entry##*/}
+    if is_archived "$name"; then new=${name%.archived}; else new=$name.archived; fi
+    [ ! -e "$rooms_dir/$name" ] && [ ! -L "$rooms_dir/$name" ] && [ -d "$rooms_dir/$new" ] && [ ! -e "$seen_dir/$new" ] || continue
+    mv -- "$entry" "$seen_dir/$new" 2>/dev/null || true
+  done
 }
 
 # ---------------------------------------------------------------- post listing

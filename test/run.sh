@@ -1403,6 +1403,22 @@ j create board >/dev/null; j create old >/dev/null; j archive old >/dev/null
 j post --as ben -m 'to the sole live room' >/dev/null
 check 'the sole-room default counts live rooms only' "$(ls "$host/.moot/rooms/board/posts"/*.md | wc -l | tr -d ' ')" '1'
 
+group "link repair carries the keeper's own cursor"
+pair_layout
+c create ops >/dev/null
+for t in 090000 090100 090200; do printf '@carol %s\n' "$t" > "$parent/carol/.moot/rooms/ops/posts/20260829-$t-alice.md"; done
+c read --new >/dev/null
+c archive ops >/dev/null
+mv "$parent/carol/.moot/rooms/ops.archived" "$parent/carol/.moot/rooms/ops"
+check 'after a by-hand un-archive nothing replays' "$(c read --new)" 'nothing new for carol'
+check 'because the cursor followed the room' "$(cat "$parent/carol/.moot/seen/ops/carol" 2>/dev/null)" '20260829-090200-alice'
+inbox="$work/unarchive-inbox"; rm -rf "$inbox"
+c read --new --deliver "$inbox" >/dev/null
+check 'and nothing is delivered twice' "$(ls "$inbox" 2>/dev/null | wc -l | tr -d ' ')" '0'
+mv "$parent/carol/.moot/rooms/ops" "$parent/carol/.moot/rooms/ops.archived"
+check 'a by-hand archive carries it too' "$(c read --new --room ops)" 'nothing new for carol'
+[ -f "$parent/carol/.moot/seen/ops.archived/carol" ] && [ ! -e "$parent/carol/.moot/seen/ops" ] && ok 'into seen/ops.archived' || no 'into seen/ops.archived'
+
 group 'link repair follows an un-archive'
 mv "$parent/carol/.moot/rooms/ops.archived" "$parent/carol/.moot/rooms/ops"
 err=$(a rooms 2>&1 >/dev/null)

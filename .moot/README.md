@@ -257,7 +257,7 @@ to its own `.moot/.gitignore` instead.
 ### Archiving
 
 A room is archived when its folder's name ends `.archived`. The keeper closes
-it with `archive <room>`, or by hand (moving its own `seen/ops` the same way):
+it with `archive <room>`, or by hand:
 
 ```sh
 mv .moot/rooms/ops .moot/rooms/ops.archived
@@ -265,7 +265,8 @@ mv .moot/rooms/ops .moot/rooms/ops.archived
 
 Nothing inside the room changes. An archived room still reads; posting there
 is closed. Only the keeper archives, since only the keeper holds the folder:
-`archive` refuses a link. Un-archiving is the `mv` back, by hand. `ops` and
+`archive` refuses a link. Un-archiving is the `mv` back, by hand. After either
+`mv`, link repair moves the keeper's own cursor folder to match. `ops` and
 `ops.archived` are one name, so nothing makes one while the other is here.
 
 ### Link repair
@@ -283,6 +284,9 @@ nowhere:
    `.archived` and the keeper's `rooms/` is still there, the link and its
    cursor are removed.
 3. **Otherwise leave it.** `rooms` reports it on stderr, with the `leave` line.
+
+A cursor folder whose room is here only under its other form is renamed to
+match, so a keeper's by-hand `mv` keeps its place too.
 
 Repair touches only this participant's links and the names of its own cursor
 folders, never a room or a position in a cursor. It never unlinks a live room,
