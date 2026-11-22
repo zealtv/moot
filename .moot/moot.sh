@@ -56,23 +56,7 @@ moot — a directory of messages
   moot.sh read --new [--as <name>] [--room <name>] [--mentions] [--deliver <dir>]
   moot.sh watch [--as <name>] [--room <name>]... [--mentions] [--interval <s>]
 
-A post is <YYYYMMDD>-<HHMMSS>-<sender>.md in rooms/<room>/posts/, UTC, plain
-Markdown. Posts are immutable: there is no edit and no delete. A correction is
-a new post.
-
-A room lives with its keeper, as a real folder in the keeper's .moot/rooms/.
-create makes one here (or: mkdir -p .moot/rooms/<room>/posts); join links to
-one someone else keeps, and never makes one; leave removes a link. archive
-closes a room you keep as rooms/<room>.archived: it still reads, and posting is
-closed. dm finds or starts the one room, dm-<a>-<b>, for you and another.
-
-post and read are aimed at one room; read --new and watch cover every live room
-here unless --room narrows them. read --new prints every post since my cursor (only
-the ones that mention me with --mentions, or written to <dir> with --deliver)
-and moves the cursor. watch waits for a new post from someone else, prints
-room/id, and exits; it never moves the cursor. watch --room (repeatable) hears
-those rooms fully; with --mentions it also hears mentions in the others. read prints times in local time;
-the filenames stay UTC.
+The format, and what each verb does: README.md beside this script.
 USAGE
 }
 
@@ -90,8 +74,7 @@ moot_name() {
 }
 
 # .gremlin/name is a key=value file (name=alice, source=generated), so take the
-# field rather than the line. An older bare-name file has no =, and still
-# resolves. Read as a sibling of .moot/, the way every other primitive in the
+# field rather than the line. A bare-name file with no = resolves too. Read as a sibling of .moot/, the way every other primitive in the
 # family reads its neighbours: a fixed path from the script's own location, so
 # the answer does not depend on the working directory and no stray .gremlin/ in
 # some ancestor can be picked up by accident. A .moot/ with no .gremlin/ beside
@@ -276,11 +259,9 @@ repair_links() {
 # Post ids in chronological order. Lexical order is chronological order, which
 # is the whole point of the filename grammar. Anything hidden (a .landing file
 # mid-compose) is skipped, so a reader never sees a half-written post.
-# Sorted by id, not by filename: the cursor compares ids, and a filename
-# sort puts an older `-N` post (`x-alice-2.md`) before `x-alice.md` because
-# `-` sorts before `.`. Sorting the ids keeps every reader's order and the
-# cursor's order the same, including for -N posts written before post stopped
-# making them.
+# Sorted by id, not by filename, so every reader's order is the cursor's: a
+# filename sort puts `x-alice-2.md` before `x-alice.md`, since `-` sorts
+# before `.`.
 post_ids() {
   local entry base
   [ -d "$posts_dir" ] || return 0
@@ -579,7 +560,7 @@ is_stamp_id() {
 }
 
 # Which `date` this machine has, found once per run: GNU takes -d, BSD takes
-# -j -f. A heading used to try both on every post, four forks each on BSD.
+# -j -f.
 date_flavour=
 pick_date_flavour() {
   [ -z "$date_flavour" ] || return 0
