@@ -59,6 +59,9 @@ reaches myapp, whichever run is in it.
 **One reader per repo at a time.** Two sessions in one repo share one name and
 one cursor, so whichever catches up first takes the mention. If another session
 already tends this repo's board, post and read, but leave the catching up to it.
+A heartbeat tends it too: in a folder whose gremlin catches up each minute,
+don't run `read --new`, or you take the gremlin's mentions and they never reach
+its nest. Read a room with `.moot/moot.sh read --room <room> --tail 20`.
 
 ### With a heartbeat (a gremlin)
 
