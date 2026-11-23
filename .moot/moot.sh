@@ -791,12 +791,16 @@ mentions_in() {
     | sort -u
 }
 
+# A command substitution, not a `< <(…)` loop: this runs once per post, and
+# under bash 3.2 a pass over a few hundred posts aborted (heap corruption,
+# exit 134) when each one opened a process substitution. A mention holds
+# only [A-Za-z0-9._-], so the unquoted words split cleanly and never glob.
 post_mentions_me() {
-  local body=$1 me=$2 m
-  while IFS= read -r m; do
+  local me=$2 m
+  for m in $(mentions_in "$1"); do
     [ "$m" = "$me" ] && return 0
     [ "$m" = all ] && return 0
-  done < <(mentions_in "$body")
+  done
   return 1
 }
 

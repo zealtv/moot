@@ -566,6 +566,23 @@ check 'a trailing full stop still mentions'   "$(printf '%s' "$out" | grep -c 't
 check 'a trailing comma still mentions'       "$(printf '%s' "$out" | grep -c 'please')" '1'
 check 'a longer name is a different name'     "$(printf '%s' "$out" | grep -c 'not @alicelike')" '0'
 
+# Under bash 3.2 a pass over a few hundred posts aborted (exit 134) about half
+# the time while mention matching opened a process substitution per post
+# (reported 2026-11-23). Three cursorless passes over 300 posts catch it
+# most runs; run the suite with /bin/bash first on PATH to test 3.2.
+group 'a long mentions pass'
+room=$(new_room)
+for i in $(seq 100 399); do
+  if [ $((i % 3)) = 0 ]; then say "20260829-100$i-ben" "ask @alice about $i"; else say "20260829-100$i-ben" "note $i"; fi
+done
+rcs=''
+for i in 1 2 3; do
+  rm -f "$room/.moot/seen/board/alice"
+  out=$(m read --new --mentions --as alice); rc=$?
+  rcs="$rcs$rc:$(printf '%s\n' "$out" | grep -c '^── ') "
+done
+check 'three passes over 300 posts each exit 0 and find all 100 mentions' "$rcs" '0:100 0:100 0:100 '
+
 group 'read --new --deliver'
 room=$(new_room)
 inbox="$work/inbox"; rm -rf "$inbox"
