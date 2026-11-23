@@ -1485,6 +1485,36 @@ err=$(d rooms 2>&1 >/dev/null)
 [ -L "$parent/dave/.moot/rooms/ops" ] && ok 'the old link stays' || no 'the old link stays'
 case $err in *'rooms/ops leads nowhere'*) ok 'and rooms reports it' ;; *) no 'and rooms reports it' "$err" ;; esac
 
+group 'a link carries its room'"'"'s mark'
+pair_layout
+c create ops >/dev/null; c create dev >/dev/null; c archive ops >/dev/null
+printf 'x\n' > "$parent/carol/.moot/rooms/ops.archived/posts/20260829-090000-carol.md"
+mkdir -p "$parent/alice/.moot/rooms"
+# A live-named link to an archived room: it is archived, whatever it is called.
+ln -s ../../../carol/.moot/rooms/ops.archived "$parent/alice/.moot/rooms/hist"
+mkdir -p "$parent/alice/.moot/seen/hist"; printf '20260829-090000-carol\n' > "$parent/alice/.moot/seen/hist/alice"
+err=$(a rooms 2>&1 >/dev/null)
+check 'a live-named link to an archived room takes the mark' "$(readlink "$parent/alice/.moot/rooms/hist.archived")" '../../../carol/.moot/rooms/ops.archived'
+[ ! -L "$parent/alice/.moot/rooms/hist" ] && ok 'and the old name goes' || no 'and the old name goes'
+check 'with its cursor' "$(cat "$parent/alice/.moot/seen/hist.archived/alice" 2>/dev/null)" '20260829-090000-carol'
+check 'and says so' "$err" 'moot: rooms/hist is archived, now rooms/hist.archived (read --new --room hist.archived shows the rest)'
+refuses 'so post refuses it under the new name' 'posting is closed' a post --room hist -m 'x'
+check 'and nothing landed in the archived room' "$(ls "$parent/carol/.moot/rooms/ops.archived/posts" | wc -l | tr -d ' ')" '1'
+check 'a second command has nothing to repair' "$(a rooms 2>&1 >/dev/null)" ''
+# An archived-named link to a live room: it is open, whatever it is called.
+ln -s ../../../carol/.moot/rooms/dev "$parent/alice/.moot/rooms/old.archived"
+mkdir -p "$parent/alice/.moot/seen/old.archived"; printf '20260829-090000-carol\n' > "$parent/alice/.moot/seen/old.archived/alice"
+err=$(a post --room old -m 'in the open' 2>&1 >/dev/null); rc=$?
+check 'an archived-named link to a live room takes the mark' "$(readlink "$parent/alice/.moot/rooms/old")" '../../../carol/.moot/rooms/dev'
+check 'with its cursor' "$(cat "$parent/alice/.moot/seen/old/alice" 2>/dev/null)" '20260829-090000-carol'
+check 'and says so' "$err" 'moot: rooms/old.archived is open again, now rooms/old'
+check 'so a post lands in the live room' "$rc:$(cat "$parent/carol/.moot/rooms/dev/posts"/*-alice.md | grep -c '^in the open$')" '0:1'
+# Repair leaves a link alone when the name it would take is taken.
+ln -s ../../../carol/.moot/rooms/ops.archived "$parent/alice/.moot/rooms/busy"
+ln -s ../../../carol/.moot/rooms/dev "$parent/alice/.moot/rooms/busy.archived"
+a rooms >/dev/null 2>&1
+check 'a mark is not taken onto a name already there' "$([ -L "$parent/alice/.moot/rooms/busy" ] && echo kept):$([ -L "$parent/alice/.moot/rooms/busy.archived" ] && echo kept)" 'kept:kept'
+
 group 'join and the two forms of a name'
 pair_layout
 c create ops >/dev/null; c archive ops >/dev/null

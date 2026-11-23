@@ -288,6 +288,14 @@ nowhere:
 A cursor folder whose room is here only under its other form is renamed to
 match, so a keeper's by-hand `mv` keeps its place too.
 
+**A link carries its room's mark.** Whatever a link is called, its name ends
+`.archived` exactly when its target's name does: `rooms/hist ->
+../../../carol/.moot/rooms/ops.archived` is archived, so repair renames it
+`hist.archived` (and its cursor with it), and the same in reverse for a link
+named `.archived` that leads to a live room. This holds for a link that
+resolves as much as for one that dangles, and a link is left alone when the
+name it would take is already here.
+
 Repair touches only this participant's links and the names of its own cursor
 folders, never a room or a position in a cursor. It never unlinks a live room,
 which git can take away for a moment (a checkout, a rebase). By hand,

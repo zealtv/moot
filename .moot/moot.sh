@@ -209,38 +209,46 @@ pass_rooms() {
 # ---------------------------------------------------------------- link repair
 
 # Every command but help starts here (README, "Link repair"): for each link in
-# rooms/ that leads nowhere, follow the one rename with its cursor folder, or
-# drop a link to an archived room that has gone, or leave it for rooms to report.
-# Built-in tests, and readlink only for a link that dangles, so it is cheap.
+# rooms/, give it the mark its target's name carries (a dangling one follows the
+# one rename, with its cursor folder), or drop a link to an archived room that
+# has gone, or leave a dangling one for rooms to report. One readlink per link.
 repair_links() {
   local entry name target new to there other
   [ -d "$rooms_dir" ] || return 0
   for entry in "$rooms_dir"/*; do
-    dangles "$entry" || continue
+    [ -L "$entry" ] || continue
     name=${entry##*/}
     target=$(readlink -- "$entry") || continue
     target=${target%/}
-    other_form "$name"; new=$other
-    other_form "$target"; to=$other
-    case $to in /*) there=$to ;; *) there=$rooms_dir/$to ;; esac
-    if [ -d "$there/posts" ]; then
-      [ ! -e "$rooms_dir/$new" ] && [ ! -L "$rooms_dir/$new" ] || continue
-      ln -sn -- "$to" "$rooms_dir/$new" 2>/dev/null || [ -L "$rooms_dir/$new" ] || continue
-      rm -f -- "$entry"
-      if [ -d "$seen_dir/$name" ] && [ ! -e "$seen_dir/$new" ]; then
-        mv -- "$seen_dir/$name" "$seen_dir/$new" 2>/dev/null || true
+    if [ -e "$entry" ]; then
+      # It resolves, so its name should carry its target's mark.
+      [ -d "$entry" ] || continue
+      to=$target
+    else
+      other_form "$target"; to=$other
+      case $to in /*) there=$to ;; *) there=$rooms_dir/$to ;; esac
+      if [ ! -d "$there/posts" ]; then
+        is_archived "$name" || continue
+        case $target in /*) there=$target ;; *) there=$rooms_dir/$target ;; esac
+        [ -d "${there%/*}" ] || continue
+        rm -f -- "$entry"
+        rm -rf -- "${seen_dir:?}/$name"
+        printf 'moot: rooms/%s has gone from its keeper; removed the link and its cursor\n' "$name" >&2
+        continue
       fi
-      if is_archived "$new"; then
-        printf 'moot: rooms/%s is archived, now rooms/%s (read --new --room %s shows the rest)\n' "$name" "$new" "$new" >&2
-      else
-        printf 'moot: rooms/%s is open again, now rooms/%s\n' "$name" "$new" >&2
-      fi
-    elif is_archived "$name"; then
-      case $target in /*) there=$target ;; *) there=$rooms_dir/$target ;; esac
-      [ -d "${there%/*}" ] || continue
-      rm -f -- "$entry"
-      rm -rf -- "${seen_dir:?}/$name"
-      printf 'moot: rooms/%s has gone from its keeper; removed the link and its cursor\n' "$name" >&2
+    fi
+    new=${name%.archived}
+    ! is_archived "$to" || new=$new.archived
+    [ ! -e "$rooms_dir/$new" ] && [ ! -L "$rooms_dir/$new" ] || continue
+    ln -sn -- "$to" "$rooms_dir/$new" 2>/dev/null || [ -L "$rooms_dir/$new" ] || continue
+    rm -f -- "$entry"
+    if [ -d "$seen_dir/$name" ] && [ ! -e "$seen_dir/$new" ]; then
+      mv -- "$seen_dir/$name" "$seen_dir/$new" 2>/dev/null || true
+    fi
+    if is_archived "$new"; then
+      printf 'moot: rooms/%s is archived, now rooms/%s (read --new --room %s shows the rest)\n' "$name" "$new" "$new" >&2
+    else
+      printf 'moot: rooms/%s is open again, now rooms/%s\n' "$name" "$new" >&2
     fi
   done
   # A cursor folder whose room is here only under its other form follows it, as
