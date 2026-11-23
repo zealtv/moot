@@ -18,6 +18,24 @@ no()   { fail=$((fail + 1)); printf '  FAIL %s\n' "$1"; [ $# -gt 1 ] && printf '
 check() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$3] got [$2]"; fi; }
 group() { printf '\n%s\n' "$1"; }
 
+# Commands as each kind of host runs them. They read $host, $room or $parent
+# when called, so a group sets the variable and then uses the helper.
+j() { "$host/.moot/moot.sh" "$@"; }
+m() { "$room/.moot/moot.sh" "$@"; }
+p() { printf '%s\n' "$3" > "$room/.moot/rooms/$1/posts/$2.md"; }
+say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+a() { ( cd "$work" && MOOT_NAME= "$parent/alice/.moot/moot.sh" "$@" ); }
+b() { ( cd "$work" && MOOT_NAME= "$parent/bob/.moot/moot.sh" "$@" ); }
+c() { ( cd "$work" && MOOT_NAME= "$parent/carol/.moot/moot.sh" "$@" ); }
+d() { ( cd "$work" && MOOT_NAME= "$parent/dave/.moot/moot.sh" "$@" ); }
+
+# refuses <label> <word> <command...>: the command exits 1 and its stderr says <word>.
+refuses() {
+  local label=$1 word=$2 out rc; shift 2
+  out=$("$@" 2>&1 >/dev/null); rc=$?
+  case "$rc:$out" in "1:"*"$word"*) ok "$label" ;; *) no "$label" "$rc:$out" ;; esac
+}
+
 # A host directory with moot installed and one room kept. Every test gets a
 # fresh one. The host is an ordinary working directory: everything moot owns is
 # under its .moot/, and the room under test is rooms/board/.
@@ -58,8 +76,8 @@ group 'a bare participant'
 host=$(new_host)
 check 'the host holds nothing but .moot/' "$(ls -A "$host")" '.moot'
 check 'a participant starts with no rooms' "$("$host/.moot/moot.sh" rooms | grep -c 'no rooms here yet')" '1'
-"$host/.moot/moot.sh" init >/dev/null 2>&1 && no 'there is no init verb' || ok 'there is no init verb'
-"$host/.moot/moot.sh" subscribe x >/dev/null 2>&1 && no 'there is no subscribe verb' || ok 'there is no subscribe verb'
+refuses 'there is no init verb' 'unknown command' j init
+refuses 'there is no subscribe verb' 'unknown command' j subscribe x
 out=$("$host/.moot/moot.sh" post --as ben -m 'x' 2>&1 >/dev/null)
 case $out in *'no rooms here yet'*'create <room>'*'join'*) ok 'post with no rooms says how to keep or hear one' ;; *) no 'post with no rooms says how to keep or hear one' "$out" ;; esac
 
@@ -83,9 +101,6 @@ group 'join is a link'
 parent=$(mktemp -d "$work/layout.XXXXXX")
 for p in carol alice dave; do mkdir -p "$parent/$p"; "$repo/install.sh" "$parent/$p" >/dev/null; done
 keep "$parent/carol" ops; keep "$parent/carol" dev
-c() { ( cd "$work" && MOOT_NAME= "$parent/carol/.moot/moot.sh" "$@" ); }
-a() { ( cd "$work" && MOOT_NAME= "$parent/alice/.moot/moot.sh" "$@" ); }
-d() { ( cd "$work" && MOOT_NAME= "$parent/dave/.moot/moot.sh" "$@" ); }
 
 out=$(a join "$parent/carol/.moot/rooms/ops")
 check 'join reports the link it made' "$out" 'joined rooms/ops -> ../../../carol/.moot/rooms/ops'
@@ -118,9 +133,9 @@ check 'join of a bare name that is no room fails' "$rc" '1'
 case $out in *"'runs' is not a room"*'create <room>'*) ok 'and says how to keep a room instead' ;; *) no 'and says how to keep a room instead' "$out" ;; esac
 check 'and makes nothing' "$(ls -A "$parent/alice/.moot/rooms" | tr '\n' ' ')" "$before"
 mkdir -p "$parent/not-a-room"
-a join "$parent/not-a-room" >/dev/null 2>&1 && no 'a folder without posts/ is refused' || ok 'a folder without posts/ is refused'
+refuses 'a folder without posts/ is refused' 'not a room' a join "$parent/not-a-room"
 [ -e "$parent/alice/.moot/rooms/not-a-room" ] && no 'and no link was made' || ok 'and no link was made'
-a join "$parent/nowhere" >/dev/null 2>&1 && no 'a path that does not exist is refused' || ok 'a path that does not exist is refused'
+refuses 'a path that does not exist is refused' 'not a room' a join "$parent/nowhere"
 mkdir -p "$parent/bad room/posts"
 out=$(a join "$parent/bad room" 2>&1 >/dev/null | tail -1)
 check 'an unsafe room name is refused' "$out" "moot: room name 'bad room' is not filename-safe (use A-Z a-z 0-9 . _ -)"
@@ -139,7 +154,7 @@ check 'join will not repoint a link to another room' "$rc" '1'
 case $out in *'rooms/ops is already a link to ../../../carol/.moot/rooms/ops'*) ok 'and names where it points' ;; *) no 'and names where it points' "$out" ;; esac
 ln -s "$work/nowhere-at-all" "$parent/dave/.moot/rooms/lost"
 mkdir -p "$parent/x/lost/posts"
-d join "$parent/x/lost" >/dev/null 2>&1 && no 'join over a dangling link is refused' || ok 'join over a dangling link is refused'
+refuses 'join over a dangling link is refused' 'already' d join "$parent/x/lost"
 
 group 'join in a bare copy'
 bare=$(mktemp -d "$work/bare.XXXXXX"); mkdir -p "$bare/app"
@@ -154,7 +169,7 @@ check 'rm of the link leaves the room' "$(ls "$parent/carol/.moot/rooms/ops/post
 check 'and the participant hears nothing' "$(d rooms | grep -c 'no rooms here yet')" '1'
 
 group 'room resolution'
-host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+host=$(new_host)
 keep "$host" board
 j post --as ben -m 'flagless' >/dev/null
 check 'the sole room needs no flag' "$(ls "$host/.moot/rooms/board/posts"/*.md | wc -l | tr -d ' ')" '1'
@@ -166,14 +181,14 @@ case $out in *board*release*) ok 'the error lists the rooms' ;; *) no 'the error
 case $out in *'--room'*) ok 'the error names the fix' ;; *) no 'the error names the fix' "$out" ;; esac
 # There is no room pointer and no environment default any more.
 printf 'release\n' > "$host/.moot/room"
-MOOT_ROOM=release j post --as ben -m 'x' >/dev/null 2>&1 && no '.moot/room and $MOOT_ROOM no longer choose a room' || ok '.moot/room and $MOOT_ROOM no longer choose a room'
+MOOT_ROOM=release refuses '.moot/room and $MOOT_ROOM no longer choose a room' 'rooms here' j post --as ben -m 'x'
 j post --as ben --room release -m 'flag' >/dev/null
 check '--room chooses' "$(ls "$host/.moot/rooms/release/posts"/*.md | wc -l | tr -d ' ')" '1'
 check 'the rooms hold their own posts' "$(j read --room board | grep -c '^flag$')" '0'
-j post --as ben --room 'bad room' -m 'x' >/dev/null 2>&1 && no 'post refuses an unsafe room name' || ok 'post refuses an unsafe room name'
-j post --as ben --room nosuch -m 'x' >/dev/null 2>&1 && no 'post to a room that is not here fails' || ok 'post to a room that is not here fails'
+refuses 'post refuses an unsafe room name' 'not filename-safe' j post --as ben --room 'bad room' -m 'x'
+refuses 'post to a room that is not here fails' 'no room nosuch' j post --as ben --room nosuch -m 'x'
 [ -e "$host/.moot/rooms/nosuch" ] && no 'and makes no room' || ok 'and makes no room'
-j read --room nosuch >/dev/null 2>&1 && no 'read of a room that is not here fails' || ok 'read of a room that is not here fails'
+refuses 'read of a room that is not here fails' 'no room nosuch' j read --room nosuch
 check 'rooms lists both' "$(j rooms | tr '\n' ' ')" 'board release '
 
 group 'the .gitignore pair'
@@ -215,8 +230,8 @@ printf 'from a file\n' > "$work/msg.md"
 "$room/.moot/moot.sh" post --as ben -f "$work/msg.md" >/dev/null
 check 'post accepts -m, -, and -f' "$(ls "$room/.moot/rooms/board/posts"/*.md | wc -l | tr -d ' ')" '5'
 
-"$room/.moot/moot.sh" post --as ben -m '' >/dev/null 2>&1 && no 'post refuses an empty message' || ok 'post refuses an empty message'
-"$room/.moot/moot.sh" post --as 'bad name' -m 'x' >/dev/null 2>&1 && no 'post refuses an unsafe sender name' || ok 'post refuses an unsafe sender name'
+refuses 'post refuses an empty message' 'empty message' m post --as ben -m ''
+refuses 'post refuses an unsafe sender name' 'not filename-safe' m post --as 'bad name' -m 'x'
 
 check 'there is no edit verb'   "$("$room/.moot/moot.sh" edit x 2>&1 >/dev/null | tail -1)" 'moot: unknown command: edit'
 check 'there is no delete verb' "$("$room/.moot/moot.sh" delete x 2>&1 >/dev/null | tail -1)" 'moot: unknown command: delete'
@@ -361,7 +376,7 @@ check 'read of an empty board says nothing' "$("$room/.moot/moot.sh" read | wc -
 
 group 'read --follow is gone'
 room=$(new_room)
-"$room/.moot/moot.sh" read --follow >/dev/null 2>&1 && no 'read --follow is refused' || ok 'read --follow is refused'
+refuses 'read --follow is refused' 'unknown option' m read --follow
 
 # ---------------------------------------------------------------- attachments
 
@@ -483,8 +498,6 @@ check 'a tool-written post is readable by hand' "$(cat "$room"/.moot/rooms/board
 
 group 'read --new --mentions'
 room=$(new_room)
-m() { "$room/.moot/moot.sh" "$@"; }
-say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
 
 say 20260829-100000-ben   'board is up'
 say 20260829-100100-ben   'hey @alice can you look at the thing'
@@ -512,18 +525,18 @@ check 'and does not repeat older mentions' "$(printf '%s' "$out" | grep -c 'can 
 check 'the whole board is still readable' "$(m read | grep -c 'unrelated announcement')" '1'
 
 group 'read --new shows every post'
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 say 20260829-100000-ben 'an announcement'
 say 20260829-100100-ben '@alice a mention'
 out=$(m read --new --as alice)
 check 'without --mentions the announcement shows' "$(printf '%s' "$out" | grep -c 'an announcement')" '1'
 check 'and so does the mention' "$(printf '%s' "$out" | grep -c 'a mention')" '1'
 check 'and the heading counts them all' "$(printf '%s' "$out" | grep -c '══ board · 2 new ══')" '1'
-m read --room board --mentions >/dev/null 2>&1 && no 'plain read refuses --mentions' || ok 'plain read refuses --mentions'
-m read --room board --deliver "$work/nowhere-inbox" >/dev/null 2>&1 && no 'plain read refuses --deliver' || ok 'plain read refuses --deliver'
+refuses 'plain read refuses --mentions' 'only go with --new' m read --room board --mentions
+refuses 'plain read refuses --deliver' 'only go with --new' m read --room board --deliver "$work/nowhere-inbox"
 
 group 'mentions in code'
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 say 20260829-100000-ben 'the flag waits for an `@alice` or `@all`'
 printf 'example:\n\n```sh\nmoot.sh post -m "@all standup"\n```\n' > "$room/.moot/rooms/board/posts/20260829-100100-ben.md"
 say 20260829-100200-ben 'use `watch --mentions`, @alice please try it'
@@ -535,7 +548,7 @@ check 'an @ beside a code span still is' "$(printf '%s' "$out" | grep -c 'please
 check 'an unclosed backtick hides nothing' "$(printf '%s' "$out" | grep -c 'still counts')" '1'
 
 group 'a mention of nobody'
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 say 20260829-100000-ben 'hello @nobodyatall'
 out=$(m read --new --mentions --as alice)
 check 'a mention of nobody reaches nobody' "$(printf '%s' "$out" | grep -c 'hello')" '0'
@@ -543,7 +556,7 @@ check 'a mention of nobody still advances the cursor' "$(cat "$room/.moot/seen/b
 check 'the mistyped mention is visible on the board' "$(m read | grep -c '@nobodyatall')" '1'
 
 group 'mention matching'
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 say 20260829-100000-ben 'thanks @alice.'
 say 20260829-100100-ben 'ask @alice, please'
 say 20260829-100200-ben 'not @alicelike'
@@ -554,7 +567,7 @@ check 'a trailing comma still mentions'       "$(printf '%s' "$out" | grep -c 'p
 check 'a longer name is a different name'     "$(printf '%s' "$out" | grep -c 'not @alicelike')" '0'
 
 group 'read --new --deliver'
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 inbox="$work/inbox"; rm -rf "$inbox"
 say 20260829-100000-ben 'quiet announcement'
 say 20260829-100100-ben '@alice please handle the thing ben raised earlier'
@@ -589,7 +602,7 @@ out=$(m read --new --as alice --deliver "$work/nest/in")
 check 'and an empty heartbeat says nothing new' "$out" 'nothing new for alice'
 
 group 'read --new on a read-only moot'
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 say 20260829-100000-ben '@alice the board is read-only from here'
 inbox="$work/ro-inbox"; rm -rf "$inbox"; mkdir -p "$inbox"
 mkdir -p "$room/.moot/seen/board"
@@ -602,14 +615,14 @@ check 'a read-only moot still delivers nothing twice' "$(ls "$inbox" | wc -l | t
 chmod +w "$room/.moot/seen/board"
 
 group 'read --new --mentions name resolution'
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 mkdir -p "$room/.gremlin"; printf 'name=fanta\n' > "$room/.gremlin/name"
 say 20260829-100000-ben '@fanta over to you'
 ( cd "$room" && MOOT_NAME= USER=username "$room/.moot/moot.sh" read --new --mentions >/dev/null )
 [ -f "$room/.moot/seen/board/fanta" ] && ok 'read --new uses the same name chain as post' || no 'read --new uses the same name chain as post'
 
 group 'a read --new pass covers every room'
-host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+host=$(new_host)
 for r in board release ops; do
   keep "$host" "$r"
   printf '@alice the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-ben.md"
@@ -624,7 +637,7 @@ check 'a second pass delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')
 
 # Two rooms can produce the same post id in the same second from the same
 # sender. The filename is the whole duplicate-suppression mechanism.
-host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+host=$(new_host)
 keep "$host" board; keep "$host" release
 printf '@alice same second, board\n' > "$host/.moot/rooms/board/posts/20260829-100000-ben.md"
 printf '@alice same second, release\n' > "$host/.moot/rooms/release/posts/20260829-100000-ben.md"
@@ -634,7 +647,7 @@ check 'a same-second clash across rooms delivers both' "$(ls "$inbox" | wc -l | 
 check 'and neither body was lost' "$(cat "$inbox"/* | grep -c 'same second,')" '2'
 
 group 'read --new --room narrows the pass'
-host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+host=$(new_host)
 keep "$host" board; keep "$host" release
 printf '@alice board\n' > "$host/.moot/rooms/board/posts/20260829-100000-ben.md"
 printf '@alice release\n' > "$host/.moot/rooms/release/posts/20260829-100000-ben.md"
@@ -643,10 +656,10 @@ j read --new --as alice --room board --deliver "$inbox" >/dev/null
 check '--room delivers from that room only' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 [ -f "$host/.moot/seen/board/alice" ] && ok '--room advances that cursor' || no '--room advances that cursor'
 [ -e "$host/.moot/seen/release/alice" ] && no '--room leaves the other cursor alone' || ok '--room leaves the other cursor alone'
-j read --new --as alice --room nosuch >/dev/null 2>&1 && no '--room on a room that is not here is an error' || ok '--room on a room that is not here is an error'
+refuses '--room on a room that is not here is an error' 'no room nosuch' j read --new --as alice --room nosuch
 
 group 'a read-only room does not stop the pass'
-host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+host=$(new_host)
 for r in aa bb cc; do
   keep "$host" "$r"
   printf '@alice the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-ben.md"
@@ -671,7 +684,7 @@ room=$(new_room)
 [ -e "$room/.moot/seen/board/alice" ] && no 'an empty board writes no cursor' || ok 'an empty board writes no cursor'
 
 group 'read --new and attachments'
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }
+room=$(new_room)
 mkdir -p "$room/.moot/rooms/board/posts/20260829-100000-ben"
 printf '@alice see the patch\n' > "$room/.moot/rooms/board/posts/20260829-100000-ben/post.md"
 printf 'diff\n' > "$room/.moot/rooms/board/posts/20260829-100000-ben/diff.patch"
@@ -681,7 +694,7 @@ check 'an attachment post is delivered' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 case $(cat "$inbox"/*) in *'diff.patch'*) ok 'a delivered attachment post points at its files' ;; *) no 'a delivered attachment post points at its files' ;; esac
 
 group 'catchup is a deprecated alias'
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 say 20260829-100000-ben 'an announcement'
 say 20260829-100100-ben '@alice please look'
 out=$(m catchup --as alice)
@@ -692,7 +705,7 @@ say 20260829-100200-ben '@alice again'
 inbox="$work/alias-inbox"; rm -rf "$inbox"
 m catchup --as alice --deliver "$inbox" >/dev/null
 check 'catchup --deliver still delivers' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
-m catchup --json >/dev/null 2>&1 && no 'catchup --json is gone' || ok 'catchup --json is gone'
+refuses 'catchup --json is gone' 'unknown option' m catchup --json
 
 # ---------------------------------------------------------------- install
 
@@ -813,7 +826,7 @@ fi
 # Each participant keeps a copy of the room, and their state inside it. The
 # folder that syncs is posts/, and nothing in it is written by two hands.
 group 'two participants'
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }
+room=$(new_room)
 printf '@alice morning\n' > "$room/.moot/rooms/board/posts/20260829-090000-ben.md"
 twin="$work/twin"; rm -rf "$twin"; cp -r "$room" "$twin"
 m read --new --as ben >/dev/null
@@ -839,22 +852,21 @@ for r in myApp carol; do
   "$repo/install.sh" "$parent/$r" >/dev/null
   ( cd "$work" && "$parent/$r/.moot/moot.sh" join "$parent/.moot/rooms/dev" >/dev/null )
 done
-b() { ( cd "$work" && MOOT_NAME= "$parent/myApp/.moot/moot.sh" "$@" ); }
-e() { ( cd "$work" && MOOT_NAME= "$parent/carol/.moot/moot.sh" "$@" ); }
+app() { ( cd "$work" && MOOT_NAME= "$parent/myApp/.moot/moot.sh" "$@" ); }
 h() { ( cd "$work" && MOOT_NAME= "$parent/.moot/moot.sh" "$@" ); }
 
-check 'a linked room is a room' "$(b rooms | grep -c dev)" '1'
+check 'a linked room is a room' "$(app rooms | grep -c dev)" '1'
 check 'and the keeper holds the real folder' "$([ -L "$parent/.moot/rooms/dev" ] && echo link || echo folder)" 'folder'
 step_date 20260829-100000 20260829-100000 20260829-100000
-b post -m '@carol dispatching two workers' >/dev/null
-e post -m '@myApp ok, holding mine' >/dev/null
+app post -m '@carol dispatching two workers' >/dev/null
+c post -m '@myApp ok, holding mine' >/dev/null
 h post -m '@all usage is fine' >/dev/null
 thaw_step
 check 'three repos posting in one second get three ids' \
   "$(ls "$parent/.moot/rooms/dev/posts" | tr '\n' ' ')" \
   '20260829-100000-ben.md 20260829-100000-carol.md 20260829-100000-myApp.md '
 
-out_e=$(e read --new --mentions)
+out_e=$(c read --new --mentions)
 check 'each repo catches up under its folder name' "$(printf '%s' "$out_e" | grep -c '══ dev · 2 for carol ══')" '1'
 check 'and gets what mentions it' "$(printf '%s' "$out_e" | grep -c -e 'dispatching two workers' -e 'usage is fine')" '2'
 [ -f "$parent/carol/.moot/seen/dev/carol" ] && ok 'the cursor lives in the reading repo' || no 'the cursor lives in the reading repo'
@@ -862,16 +874,16 @@ check 'and gets what mentions it' "$(printf '%s' "$out_e" | grep -c -e 'dispatch
 [ ! -e "$parent/.moot/rooms/dev/seen" ] && [ "$(ls -A "$parent/.moot/rooms/dev")" = posts ] \
   && ok 'the room holds posts/ and nothing else' || no 'the room holds posts/ and nothing else'
 check "one repo's catch-up leaves another's cursor alone" "$(ls -A "$parent/myApp/.moot/seen/dev" 2>/dev/null | wc -l | tr -d ' ')" '0'
-out_b=$(b read --new --mentions)
+out_b=$(app read --new --mentions)
 check 'the other repo still gets its own mentions' "$(printf '%s' "$out_b" | grep -c -e 'holding mine' -e 'usage is fine')" '2'
-check 'and a second pass shows nothing twice' "$(b read --new --mentions)" 'nothing new for myApp'
+check 'and a second pass shows nothing twice' "$(app read --new --mentions)" 'nothing new for myApp'
 
 group 'a pass leaves the current second for the next'
 # A post can land in the second a pass reads, under a name that sorts below the
 # cursor's (ben after carol). If the cursor moved onto that second, the late
 # post would be skipped for good. The stubbed clock stands at the second
 # being read; a pass leaves that second alone.
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 say 20260829-095959-carol 'settled earlier'
 say 20260829-100000-carol '@alice same second, sorts last'
 freeze_date 20260829-100000
@@ -887,7 +899,7 @@ check 'and moves the cursor onto them' "$(cat "$room/.moot/seen/board/alice")" '
 check 'and a third pass finds nothing' "$(m read --new --mentions --as alice)" 'nothing new for alice'
 thaw_date
 
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 say 20260829-100000-carol 'first, same second'
 freeze_date 20260829-100000
 check 'read --new shows nothing from the current second' "$(m read --new --as alice)" 'nothing new for alice'
@@ -901,7 +913,7 @@ check 'and the heading counts them' "$(printf '%s' "$out" | grep -c '══ boar
 thaw_date
 
 # Stamps from a clock ahead of mine wait too.
-room=$(new_room); m() { "$room/.moot/moot.sh" "$@"; }; say() { printf '%s\n' "$2" > "$room/.moot/rooms/board/posts/$1.md"; }
+room=$(new_room)
 say 20260829-100000-ben 'now'
 say 20260829-100500-ben 'five minutes ahead of my clock'
 freeze_date 20260829-100000
@@ -922,12 +934,12 @@ check 'because the cursor stays on the last stamp' "$(cat "$room/.moot/seen/boar
 # read --new through a linked room: each repo's cursor stays in its own seen/.
 rp_dev() { printf '%s\n' "$2" > "$parent/.moot/rooms/dev/posts/$1.md"; }
 rp_dev 20260829-110000-ben '@all a late note'
-out=$(b read --new)
+out=$(app read --new)
 check 'read --new reads a linked room' "$(printf '%s' "$out" | grep -c 'a late note')" '1'
 [ -f "$parent/myApp/.moot/seen/dev/myApp" ] && ok 'and its cursor is in the reading repo' || no 'and its cursor is in the reading repo'
 [ ! -e "$parent/.moot/seen/dev/myApp" ] && ok 'and not in the keeper' || no 'and not in the keeper'
-check "so another repo's --new still shows the post" "$(e read --new | grep -c 'a late note')" '1'
-check 'and a second --new in the first repo shows nothing' "$(b read --new)" 'nothing new for myApp'
+check "so another repo's --new still shows the post" "$(c read --new | grep -c 'a late note')" '1'
+check 'and a second --new in the first repo shows nothing' "$(app read --new)" 'nothing new for myApp'
 
 # ---------------------------------------------------------------- local time
 
@@ -998,14 +1010,14 @@ group 'read --new'
 parent=$(mktemp -d "$work/new.XXXXXX")
 mkdir -p "$parent/ben"
 "$repo/install.sh" "$parent/ben" >/dev/null
-m() { ( cd "$work" && MOOT_NAME= TZ=XXX-11 "$parent/ben/.moot/moot.sh" "$@" ); }
+mz() { ( cd "$work" && MOOT_NAME= TZ=XXX-11 "$parent/ben/.moot/moot.sh" "$@" ); }
 keep "$parent/ben" runs; keep "$parent/ben" dev
 rp() { printf '%s\n' "$2" > "$parent/ben/.moot/rooms/$1/posts/$3.md"; }
 rp runs 'run one done' 20260829-100000-alice
 rp runs '@ben please look' 20260829-110000-alice
 rp dev  'dev note' 20260829-103000-carol
 
-out=$(m read --new)
+out=$(mz read --new)
 check 'read --new with several rooms and no --room needs no choice' "$(printf '%s' "$out" | grep -c 'run one done')" '1'
 check 'it shows every post, not just mentions' "$(printf '%s' "$out" | grep -c -e 'run one done' -e 'dev note' -e 'please look')" '3'
 check 'each room gets a heading with its count' "$(printf '%s' "$out" | grep -c -e '══ dev · 1 new ══' -e '══ runs · 2 new ══')" '2'
@@ -1015,47 +1027,47 @@ case $out in *'2026-08-29 21:00:00 +1100 · alice'*) ok 'headings are in local t
 check 'the cursors moved to the newest post in each room' \
   "$(cat "$parent/ben/.moot/seen/runs/ben") $(cat "$parent/ben/.moot/seen/dev/ben")" \
   '20260829-110000-alice 20260829-103000-carol'
-check 'a second call shows nothing new' "$(m read --new)" 'nothing new for ben'
+check 'a second call shows nothing new' "$(mz read --new)" 'nothing new for ben'
 
 rp runs 'run two done' 20260829-120000-alice
-out=$(m read --new)
+out=$(mz read --new)
 check 'a later call shows only what arrived since' "$(printf '%s' "$out" | grep -c -e 'run two done' -e 'run one done' -e 'dev note')" '1'
 check 'and only the room that changed gets a heading' "$(printf '%s' "$out" | grep -c '══')" '1'
 
 # Plain read never touches the cursor.
 rp runs 'run three done' 20260829-130000-alice
-m read --room runs >/dev/null
+mz read --room runs >/dev/null
 check 'plain read leaves the cursor alone' "$(cat "$parent/ben/.moot/seen/runs/ben")" '20260829-120000-alice'
-check 'so --new still shows what read showed' "$(m read --new | grep -c 'run three done')" '1'
+check 'so --new still shows what read showed' "$(mz read --new | grep -c 'run three done')" '1'
 
 # --room narrows; the other room's cursor stays put.
 rp runs 'run four done' 20260829-140000-alice
 rp dev  'dev two' 20260829-141000-carol
-out=$(m read --new --room dev)
+out=$(mz read --new --room dev)
 check '--new --room shows that room only' "$(printf '%s' "$out" | grep -c -e 'dev two' -e 'run four')" '1'
 check "and leaves the other room's cursor" "$(cat "$parent/ben/.moot/seen/runs/ben")" '20260829-130000-alice'
 
 # --mentions keeps the cursor moving past everything.
 rp runs '@ben after' 20260829-150000-alice
 rp runs 'plain after' 20260829-151000-alice
-out=$(m read --new --mentions --room runs)
+out=$(mz read --new --mentions --room runs)
 check '--mentions shows only the mention' "$(printf '%s' "$out" | grep -c -e '@ben after')" '1'
 check 'and not the plain post' "$(printf '%s' "$out" | grep -c 'plain after')" '0'
 check '--mentions moves the cursor past both' "$(cat "$parent/ben/.moot/seen/runs/ben")" '20260829-151000-alice'
-check 'so a plain --new shows nothing after it' "$(m read --new --room runs)" 'nothing new for ben'
+check 'so a plain --new shows nothing after it' "$(mz read --new --room runs)" 'nothing new for ben'
 
 # Names: --as picks the cursor; another name has its own.
-check 'another name starts from the top' "$(m read --new --as alice | grep -c '══')" '2'
-check 'and keeps its own cursor' "$(m read --new --as alice)" 'nothing new for alice'
+check 'another name starts from the top' "$(mz read --new --as alice | grep -c '══')" '2'
+check 'and keeps its own cursor' "$(mz read --new --as alice)" 'nothing new for alice'
 
 # Options that fight the cursor are refused, not ignored.
 for opt in '--since x' '--tail 1'; do
   # shellcheck disable=SC2086
-  m read --new $opt >/dev/null 2>&1; rc=$?
+  mz read --new $opt >/dev/null 2>&1; rc=$?
   [ "$rc" -ne 0 ] && ok "--new refuses $opt" || no "--new refuses $opt"
 done
-m read --room runs --as ben >/dev/null 2>&1 && no '--as without --new is refused' || ok '--as without --new is refused'
-m read --new --room nonesuch >/dev/null 2>&1 && no '--new --room of an unknown room fails' || ok '--new --room of an unknown room fails'
+refuses '--as without --new is refused' 'only go with --new' mz read --room runs --as ben
+refuses '--new --room of an unknown room fails' 'no room nonesuch' mz read --new --room nonesuch
 
 # A room that cannot take a cursor still reads, and says so.
 ro=$(new_room)
@@ -1251,7 +1263,6 @@ check 'its first post fires, though it was there when the room appeared' "$rc:$(
 
 group 'watch --room (repeatable) and mixed mode'
 room=$(new_room); keep "$room" run; keep "$room" runs; keep "$room" other
-p() { printf '%s\n' "$3" > "$room/.moot/rooms/$1/posts/$2.md"; }
 for r in board run runs other; do p "$r" 20260829-090000-alice 'old'; done
 start_watch "$room/.moot/moot.sh" watch --as ben --room run --room board
 p other 20260829-091000-alice 'hello @ben'
@@ -1262,7 +1273,6 @@ wait_watch
 check 'each --room is heard fully' "$rc:$(cat "$work/watch.out")" '0:board/20260829-091100-alice'
 
 room=$(new_room); keep "$room" run
-p() { printf '%s\n' "$3" > "$room/.moot/rooms/$1/posts/$2.md"; }
 for r in board run; do p "$r" 20260829-090000-alice 'old'; done
 start_watch "$room/.moot/moot.sh" watch --as ben --room run --mentions
 check 'watching names the full rooms and the mentions flag' "$(grep -c '^rooms=run$' "$room/.moot/watching"):$(grep -c '^mentions=1$' "$room/.moot/watching")" '1:1'
@@ -1289,7 +1299,7 @@ p run 20260829-093100-alice '@ben'
 wait_watch
 check 'and fires on one' "$rc:$(cat "$work/watch.out")" '0:run/20260829-093100-alice'
 
-"$room/.moot/moot.sh" watch --as ben --room nosuch >/dev/null 2>&1 && no 'a --room that is not here is refused' || ok 'a --room that is not here is refused'
+refuses 'a --room that is not here is refused' 'no room nosuch' m watch --as ben --room nosuch
 
 group 'install beside a running watch'
 room=$(new_room)
@@ -1306,19 +1316,12 @@ check 'the running watch still fires after an install' "$rc:$(cat "$work/watch.o
 
 group 'watch has no --json'
 room=$(new_room)
-"$room/.moot/moot.sh" watch --json >/dev/null 2>&1 && no 'watch --json is gone' || ok 'watch --json is gone'
+refuses 'watch --json is gone' 'unknown option' m watch --json
 
 # ---------------------------------------------------------------- room verbs
 
-# refuses <label> <word> <command...>: the command exits 1 and its stderr says <word>.
-refuses() {
-  local label=$1 word=$2 out rc; shift 2
-  out=$("$@" 2>&1 >/dev/null); rc=$?
-  case "$rc:$out" in "1:"*"$word"*) ok "$label" ;; *) no "$label" "$rc:$out" ;; esac
-}
-
 group 'create'
-host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+host=$(new_host)
 check 'create prints the room it made' "$(j create ops)" 'created rooms/ops'
 check 'and the room holds posts/ with a .gitkeep' "$(ls -A "$host/.moot/rooms/ops/posts")" '.gitkeep'
 check 'and nothing else' "$(ls -A "$host/.moot/rooms/ops")" 'posts'
@@ -1340,10 +1343,6 @@ pair_layout() {
   parent=$(mktemp -d "$work/pair.XXXXXX")
   for p in alice bob carol dave; do mkdir -p "$parent/$p"; "$repo/install.sh" "$parent/$p" >/dev/null; done
 }
-a() { ( cd "$work" && MOOT_NAME= "$parent/alice/.moot/moot.sh" "$@" ); }
-b() { ( cd "$work" && MOOT_NAME= "$parent/bob/.moot/moot.sh" "$@" ); }
-c() { ( cd "$work" && MOOT_NAME= "$parent/carol/.moot/moot.sh" "$@" ); }
-d() { ( cd "$work" && MOOT_NAME= "$parent/dave/.moot/moot.sh" "$@" ); }
 
 group 'leave'
 pair_layout
@@ -1406,7 +1405,7 @@ check 'archive of a heard archived room is already so' "$(a archive ops)" 'alrea
 c create dev >/dev/null; c create zed >/dev/null
 check 'rooms lists live rooms first, then archived ones' "$(c rooms | tr '\n' ' ')" 'dev dm-alice-carol zed ops.archived '
 
-host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+host=$(new_host)
 j create board >/dev/null; j create old >/dev/null; j archive old >/dev/null
 j post --as ben -m 'to the sole live room' >/dev/null
 check 'the sole-room default counts live rooms only' "$(ls "$host/.moot/rooms/board/posts"/*.md | wc -l | tr -d ' ')" '1'
@@ -1688,7 +1687,7 @@ case $out in *"this side's holds posts"*) ok 'and says it is this side that hold
 # ---------------------------------------------------------------- status
 
 group 'status'
-host=$(new_host); j() { "$host/.moot/moot.sh" "$@"; }
+host=$(new_host)
 out=$(j status 2>/dev/null); rc=$?
 check 'with no status, status prints nothing and exits 0' "$rc:$out" '0:'
 freeze_date 20261122-093012
