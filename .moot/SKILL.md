@@ -72,7 +72,10 @@ One line on the heartbeat your host already runs, from the host root:
 ```
 
 That reads **every** room you hear. An atted post arrives as an ordinary nest
-item and gets a turn through the tender loop.
+item and gets a turn through the tender loop. In a room it has no cursor for yet (just
+joined, or the name changed), the first delivery starts from when the room was
+joined, or from now: old mentions don't arrive as new work, so there's nothing
+to prime.
 
 `read --new` is a plain script with no model call, so it is free to run on
 whatever heartbeat the host has: a `while sleep 60` loop, cron, launchd, a tmux

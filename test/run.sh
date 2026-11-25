@@ -42,12 +42,17 @@ refuses() {
 new_room() {
   local dir; dir=$(mktemp -d "$work/host.XXXXXX")
   "$repo/install.sh" "$dir" >/dev/null
-  mkdir -p "$dir/.moot/rooms/board/posts"
+  # create, not mkdir: it leaves the join mark, so a first delivery here
+  # starts from the room's beginning rather than from now.
+  MOOT_NAME= "$dir/.moot/moot.sh" create board >/dev/null
   printf '%s' "$dir"
 }
 
 # Keep a room: a real folder in the host's own .moot/rooms/. No tool needed.
 keep() { mkdir -p "$1/.moot/rooms/$2/posts"; }
+# Keep one with create, which leaves the join mark: a first delivery there
+# starts from the beginning, as for a room just made.
+own() { MOOT_NAME= "$1/.moot/moot.sh" create "$2" >/dev/null; }
 
 # A host with moot installed and no room.
 new_host() {
@@ -87,7 +92,7 @@ check 'a kept room holds nothing but posts/' "$(ls -A "$room/.moot/rooms/board")
 check 'rooms lists it' "$("$room/.moot/moot.sh" rooms)" 'board'
 "$room/.moot/moot.sh" post --as ben -m 'hello' >/dev/null
 check 'a post lands in the kept folder' "$(ls "$room/.moot/rooms/board/posts"/*.md | wc -l | tr -d ' ')" '1'
-check 'posting makes no cursor' "$(ls -A "$room/.moot" | grep -c '^seen$')" '0'
+check 'posting makes no cursor' "$(ls "$room/.moot/seen/board" 2>/dev/null | wc -l | tr -d ' ')" '0'
 printf 'old\n' > "$room/.moot/rooms/board/posts/20260829-090000-ben.md"
 "$room/.moot/moot.sh" read --new --as ben >/dev/null
 [ -d "$room/.moot/seen/board" ] && ok 'the cursor directory is made when first needed' || no 'the cursor directory is made when first needed'
@@ -609,10 +614,10 @@ check 'a re-run delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 
 # Moot does not know what a nest is: gremlin integration is a path.
 rm -rf "$work/nest"; mkdir -p "$work/nest/in"
-rm -f "$room/.moot/seen/board/alice"
+rm -f "$room/.moot/seen/board/alice"; : > "$room/.moot/seen/board/.joined"
 m read --new --as alice --deliver "$work/nest/in" >/dev/null
 check '--deliver takes any directory the caller names' "$(ls "$work/nest/in" | wc -l | tr -d ' ')" '1'
-rm -f "$room/.moot/seen/board/alice"
+rm -f "$room/.moot/seen/board/alice"; : > "$room/.moot/seen/board/.joined"
 m read --new --as alice --deliver "$work/nest/in" >/dev/null
 check 'even with the cursor gone, nothing is delivered twice' "$(ls "$work/nest/in" | wc -l | tr -d ' ')" '1'
 out=$(m read --new --as alice --deliver "$work/nest/in")
@@ -641,7 +646,7 @@ say 20260829-100000-ben '@fanta over to you'
 group 'a read --new pass covers every room'
 host=$(new_host)
 for r in board release ops; do
-  keep "$host" "$r"
+  own "$host" "$r"
   printf '@alice the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-ben.md"
 done
 inbox="$work/pass-inbox"; rm -rf "$inbox"
@@ -655,7 +660,7 @@ check 'a second pass delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')
 # Two rooms can produce the same post id in the same second from the same
 # sender. The filename is the whole duplicate-suppression mechanism.
 host=$(new_host)
-keep "$host" board; keep "$host" release
+own "$host" board; own "$host" release
 printf '@alice same second, board\n' > "$host/.moot/rooms/board/posts/20260829-100000-ben.md"
 printf '@alice same second, release\n' > "$host/.moot/rooms/release/posts/20260829-100000-ben.md"
 inbox="$work/clash-inbox"; rm -rf "$inbox"
@@ -665,7 +670,7 @@ check 'and neither body was lost' "$(cat "$inbox"/* | grep -c 'same second,')" '
 
 group 'read --new --room narrows the pass'
 host=$(new_host)
-keep "$host" board; keep "$host" release
+own "$host" board; own "$host" release
 printf '@alice board\n' > "$host/.moot/rooms/board/posts/20260829-100000-ben.md"
 printf '@alice release\n' > "$host/.moot/rooms/release/posts/20260829-100000-ben.md"
 inbox="$work/narrow-inbox"; rm -rf "$inbox"
@@ -678,7 +683,7 @@ refuses '--room on a room that is not here is an error' 'no room nosuch' j read 
 group 'a read-only room does not stop the pass'
 host=$(new_host)
 for r in aa bb cc; do
-  keep "$host" "$r"
+  own "$host" "$r"
   printf '@alice the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-ben.md"
 done
 mkdir -p "$host/.moot/seen/bb"; chmod -w "$host/.moot/seen/bb"
@@ -890,7 +895,7 @@ check 'and gets what mentions it' "$(printf '%s' "$out_e" | grep -c -e 'dispatch
 [ ! -e "$parent/.moot/seen/dev/carol" ] && ok 'and never in the keeper' || no 'and never in the keeper'
 [ ! -e "$parent/.moot/rooms/dev/seen" ] && [ "$(ls -A "$parent/.moot/rooms/dev")" = posts ] \
   && ok 'the room holds posts/ and nothing else' || no 'the room holds posts/ and nothing else'
-check "one repo's catch-up leaves another's cursor alone" "$(ls -A "$parent/myApp/.moot/seen/dev" 2>/dev/null | wc -l | tr -d ' ')" '0'
+check "one repo's catch-up leaves another's cursor alone" "$(ls "$parent/myApp/.moot/seen/dev" 2>/dev/null | wc -l | tr -d ' ')" '0'
 out_b=$(app read --new --mentions)
 check 'the other repo still gets its own mentions' "$(printf '%s' "$out_b" | grep -c -e 'holding mine' -e 'usage is fine')" '2'
 check 'and a second pass shows nothing twice' "$(app read --new --mentions)" 'nothing new for myApp'
@@ -1645,6 +1650,7 @@ out=$(b read --new --mentions)
 check 'every post from the other side counts' "$(printf '%s' "$out" | grep -c 'no at in this')" '1'
 check 'but not my own' "$(printf '%s' "$out" | grep -c 'my own note')" '0'
 inbox="$work/dm-inbox"; rm -rf "$inbox"; rm -rf "${parent:?}/bob/.moot/seen"
+mkdir -p "$parent/bob/.moot/seen/dm-alice-bob"; : > "$parent/bob/.moot/seen/dm-alice-bob/.joined"
 b read --new --deliver "$inbox" >/dev/null
 check 'and --deliver delivers it' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 c create plain >/dev/null; b join "$parent/carol/.moot/rooms/plain" >/dev/null
@@ -1746,6 +1752,78 @@ printf 'by hand, no stamp\nmore lines\n' > "$host/.moot/status"
 check 'a by-hand status is read as it stands' "$(j status)" 'by hand, no stamp'
 refuses 'an empty status is refused' 'empty status' j status -m '  '
 check 'status leaves no temporary file' "$(ls -A "$host/.moot" | grep -c '^\.status')" '0'
+
+# ---------------------------------------------------------------- a first delivery
+
+group 'a delivery with no cursor and no mark starts from now'
+host=$(new_host); keep "$host" board
+printf '@alice old work\n' > "$host/.moot/rooms/board/posts/20260829-090000-ben.md"
+inbox="$work/now-inbox"; rm -rf "$inbox"
+check 'it delivers nothing old' "$(j read --new --as alice --deliver "$inbox")" 'nothing new for alice'
+check 'and writes no file' "$(ls "$inbox" | wc -l | tr -d ' ')" '0'
+check 'but leaves its cursor at the newest post' "$(cat "$host/.moot/seen/board/alice")" '20260829-090000-ben'
+printf '@alice new work\n' > "$host/.moot/rooms/board/posts/20260829-091000-ben.md"
+j read --new --as alice --deliver "$inbox" >/dev/null
+check 'the next post delivers' "$(ls "$inbox")" 'moot-board-20260829-091000-ben.md'
+case $(j read --new --as carol) in *'old work'*) ok 'a catch-up with no cursor still shows history' ;; *) no 'a catch-up with no cursor still shows history' ;; esac
+
+group 'a renamed reader is not handed old mentions again'
+host=$(new_host); keep "$host" board
+printf '@all old news\n' > "$host/.moot/rooms/board/posts/20260829-090000-ben.md"
+inbox="$work/rename-inbox"; rm -rf "$inbox"
+j read --new --as fanta --deliver "$inbox" >/dev/null
+j read --new --as fanta-2 --deliver "$inbox" >/dev/null
+check 'a new name delivers nothing old' "$(ls "$inbox" | wc -l | tr -d ' ')" '0'
+
+group 'a cursorless delivery in an empty room starts from its first post'
+host=$(new_host); keep "$host" board
+inbox="$work/empty-inbox"; rm -rf "$inbox"
+j read --new --as alice --deliver "$inbox" >/dev/null
+[ -f "$host/.moot/seen/board/.joined" ] && ok 'it leaves an empty mark' || no 'it leaves an empty mark'
+[ -e "$host/.moot/seen/board/alice" ] && no 'and no cursor' || ok 'and no cursor'
+printf '@alice the first\n' > "$host/.moot/rooms/board/posts/20260829-090000-ben.md"
+j read --new --as alice --deliver "$inbox" >/dev/null
+check 'the first post delivers' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
+[ -e "$host/.moot/seen/board/.joined" ] && no 'and the mark is gone' || ok 'and the mark is gone'
+
+group 'join leaves a mark, so a mention after the link still arrives'
+keeper=$(new_host); keep "$keeper" ops
+printf '@alice before the join\n' > "$keeper/.moot/rooms/ops/posts/20260829-090000-carol.md"
+host=$(new_host)
+j join "$keeper/.moot/rooms/ops" >/dev/null
+check 'the mark is the newest post at the join' "$(cat "$host/.moot/seen/ops/.joined")" '20260829-090000-carol'
+printf '@alice after the join\n' > "$keeper/.moot/rooms/ops/posts/20260829-091000-carol.md"
+inbox="$work/join-inbox"; rm -rf "$inbox"
+j read --new --as alice --deliver "$inbox" >/dev/null
+check 'only the mention after the join delivers' "$(ls "$inbox")" 'moot-ops-20260829-091000-carol.md'
+[ -e "$host/.moot/seen/ops/.joined" ] && no 'the first cursor removes the mark' || ok 'the first cursor removes the mark'
+check 'the mark never reaches the keeper' "$(ls -A "$keeper/.moot/rooms/ops")" 'posts'
+check 'join prints what it always did' "$(cd "$work" && MOOT_NAME= "$host/.moot/moot.sh" join "$keeper/.moot/rooms/ops")" 'already in rooms/ops'
+
+group 'a catch-up after a join still shows history, and spends the mark'
+keeper=$(new_host); keep "$keeper" ops
+printf 'the charter\n' > "$keeper/.moot/rooms/ops/posts/20260829-090000-carol.md"
+host=$(new_host)
+j join "$keeper/.moot/rooms/ops" >/dev/null
+case $(j read --new --as alice) in *'the charter'*) ok 'read --new shows the room from its start' ;; *) no 'read --new shows the room from its start' ;; esac
+[ -e "$host/.moot/seen/ops/.joined" ] && no 'and its cursor removes the mark' || ok 'and its cursor removes the mark'
+
+group 'create and dm leave an empty mark'
+host=$(new_host)
+j create board >/dev/null
+check 'create: an empty mark' "$(cat "$host/.moot/seen/board/.joined" 2>&1)" ''
+printf '@alice early\n' > "$host/.moot/rooms/board/posts/20260829-090000-ben.md"
+inbox="$work/create-inbox"; rm -rf "$inbox"
+j read --new --as alice --deliver "$inbox" >/dev/null
+check 'a post before the first delivery delivers' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
+pair_layout
+a dm bob >/dev/null
+[ -f "$parent/alice/.moot/seen/dm-alice-bob/.joined" ] && ok 'dm: the starter has a mark' || no 'dm: the starter has a mark'
+[ -f "$parent/bob/.moot/seen/dm-alice-bob/.joined" ] && ok 'dm: the other side has one too' || no 'dm: the other side has one too'
+printf '@bob are you free?\n' > "$parent/alice/.moot/rooms/dm-alice-bob/posts/20260829-090000-alice.md"
+inbox="$work/dm-mark-inbox"; rm -rf "$inbox"
+b read --new --deliver "$inbox" >/dev/null
+check 'a DM first post delivers' "$(ls "$inbox" | wc -l | tr -d ' ')" '1'
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

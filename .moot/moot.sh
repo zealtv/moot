@@ -370,6 +370,7 @@ cmd_join() {
   rel=$(relative_path "$rooms_real" "$real")
   # -n never follows a link another command made here a moment ago.
   ln -sn -- "$rel" "$link" 2>/dev/null || [ "$link" -ef "$real" ] || die "cannot link rooms/$name"
+  join_mark "$name" "$real/posts"
   printf 'joined rooms/%s -> %s\n' "$name" "$rel"
 }
 
@@ -402,6 +403,7 @@ cmd_create() {
   name_free "$arg"
   mkdir -p -- "$rooms_dir/$arg/posts"
   : > "$rooms_dir/$arg/posts/.gitkeep"
+  join_mark "$arg" "$rooms_dir/$arg/posts"
   printf 'created rooms/%s\n' "$arg"
 }
 
@@ -650,6 +652,21 @@ cursor_put() {
     && printf '%s\n' "$3" > "$seen_dir/$1/$2" 2>/dev/null
 }
 
+# The join mark, .moot/seen/<room>/.joined: the room's newest settled post id
+# when join, create or dm linked it here (empty for a room with no posts yet).
+# A delivery with no cursor starts from it, so an @ posted between the link and
+# the first delivery still arrives; with no mark it starts from now. The first
+# cursor written in the room removes it. No name begins with '.', so the mark
+# never stands for a cursor. join_mark <room> <posts-dir>; best effort, like a
+# cursor in a read-only seen/.
+join_mark() {
+  local posts_dir=$2 id last= pass_now
+  pass_now=$(date -u +%Y%m%d-%H%M%S)
+  while IFS= read -r id; do last=$id; done < <(settled_ids)
+  mkdir -p -- "$seen_dir/$1" 2>/dev/null \
+    && printf '%s\n' "$last" > "$seen_dir/$1/.joined" 2>/dev/null || true
+}
+
 # read --new, the one catch-up verb: everything since this reader's cursor, room
 # by room, then the cursor moves. Rooms stay separate, each under its own
 # heading; there is no merged timeline. By default every new post prints,
@@ -678,16 +695,31 @@ read_new() {
   for r in ${rooms[@]+"${rooms[@]}"}; do
     use_room "$r" soft || continue
     cursor=$(cursor_get "$room" "$me")
+    # A delivery with no cursor starts from the join mark, or else from now:
+    # it moves the cursor past everything there and delivers none of it. A
+    # catch-up with no cursor still shows the room's whole history.
+    local from_now=0
+    if [ -z "$cursor" ] && [ -n "$deliver" ]; then
+      if [ -f "$seen_dir/$room/.joined" ]; then cursor=$(cursor_get "$room" .joined)
+      else from_now=1; fi
+    fi
     local new=() picked=()
     while IFS= read -r id; do
       if [ -z "$cursor" ] || [ "$id" \> "$cursor" ]; then new+=("$id"); fi
     done < <(settled_ids)
-    [ ${#new[@]} -gt 0 ] || continue
+    if [ ${#new[@]} -eq 0 ]; then
+      # Nothing there yet: "now" is the start, so leave an empty mark and the
+      # room's first post is delivered.
+      [ "$from_now" = 0 ] || join_mark "$room" "$posts_dir"
+      continue
+    fi
     newest=${new[${#new[@]}-1]}
 
-    for id in "${new[@]}"; do
-      if [ "$mentions" = 0 ] || counts_for_me "$id" "$me"; then picked+=("$id"); fi
-    done
+    if [ "$from_now" = 0 ]; then
+      for id in "${new[@]}"; do
+        if [ "$mentions" = 0 ] || counts_for_me "$id" "$me"; then picked+=("$id"); fi
+      done
+    fi
 
     if [ -n "$deliver" ]; then
       for id in ${picked[@]+"${picked[@]}"}; do
@@ -703,7 +735,9 @@ read_new() {
     # A room reachable read-only is a normal way to run. It still reads, the
     # pass goes on to the next room, and delivered filenames carry the room and
     # post id, so a repeat delivers nothing twice.
-    if ! cursor_put "$room" "$me" "$newest"; then
+    if cursor_put "$room" "$me" "$newest"; then
+      rm -f -- "${seen_dir:?}/$room/.joined" 2>/dev/null
+    else
       printf 'moot: cannot write %s (read-only room); the next --new will repeat these\n' \
         ".moot/seen/$room/$me" >&2
     fi
@@ -1134,6 +1168,7 @@ cmd_dm() {
   # 3. Neither has it: start it here, and the other's script links it there.
   mkdir -p -- "$mine/posts"
   : > "$mine/posts/.gitkeep"
+  join_mark "$room" "$mine/posts"
   if out=$(dm_link_there); then printf 'started rooms/%s\n' "$room"; return 0; fi
   # Both started at once, so each holds a real folder. The later name yields
   # if its room holds no posts; the first tries once more after a second.

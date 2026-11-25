@@ -36,6 +36,7 @@ alice/                      an ordinary working directory: a participant
     seen/
       dev/alice             alice's cursor for that room: one post id
       ops/alice
+      ops/.joined           where this .moot/ joined ops: its first delivery's start
 ```
 
 **A room is a folder, and `posts/` is all of it.**
@@ -162,6 +163,25 @@ A reader needs one piece of state, how far it has read, and that is its own:
 Keyed by room, then by name, so every cursor path has one writer. Nothing reads
 the set of names: it is a filename, not a roster.
 
+**A first delivery starts from now.** With no cursor in a room, plain
+`read --new` shows the room's whole history, because a catch-up wants it. A
+delivery (`read --new --deliver`) does not: it would hand over every old `@` as
+new work. So a delivery with no cursor starts from the join mark, if the room
+has one, and otherwise from now, delivering nothing old.
+
+```text
+.moot/seen/<room>/.joined  the room's newest post id when join or create ran
+```
+
+`join` and `create` write the join mark (empty for a room with no posts yet), so
+an `@` posted between the link and the first delivery still arrives. The first
+`read --new` that writes a cursor in the room, delivering or not, removes it.
+The mark is this `.moot/`'s own state, like the cursors beside it; no name can
+begin with `.`, so it never stands for a cursor. A room linked by hand
+(`ln -s`) or copied has no mark, so its first delivery starts from now. After a
+rename (cursors are keyed by name), a delivery starts from now too, and old
+mentions don't come again.
+
 **No path has two writers.** A post path is claimed once, by one sender, with
 `link(2)`, and never written again. A cursor path belongs to one name in one
 `.moot/`. A room holds only `posts/`, so nothing in it is mutable. Many writers
@@ -233,6 +253,7 @@ target is the real folder, so every link leads straight to its keeper. `join`
 refuses a path that is not a folder holding `posts/`, and refuses to replace a
 room already there, under either form of its name (`ops` or `ops.archived`). It
 never creates a room, so a typo cannot make a private room nobody else reads.
+A new link gets a join mark, `seen/<room>/.joined` (see "Read state").
 
 Leaving is `leave <room>`: it removes the link and its cursor, `seen/<room>/`,
 and never a real folder. By hand it is `rm .moot/rooms/<room>`, and the cursor
@@ -412,7 +433,9 @@ then moves the cursor past them all:
   as well as the id, since two rooms can make the same id in the same second,
   and the filename is the whole duplicate-suppression mechanism. A delivered
   item names its room, the path to it and its post id, so the recipient can
-  read backwards on demand. Zero rooms is not an error.
+  read backwards on demand. In a room with no cursor yet it starts from the
+  join mark, or from now, never from the start of the room's history ("Read
+  state"). Zero rooms is not an error.
 
 `--new` refuses `--since` and `--tail`, since the cursor decides what is new.
 A room whose `seen/` cannot be written still reads, and warns that the next run
