@@ -663,8 +663,7 @@ join_mark() {
   local posts_dir=$2 id last= pass_now
   pass_now=$(date -u +%Y%m%d-%H%M%S)
   while IFS= read -r id; do last=$id; done < <(settled_ids)
-  mkdir -p -- "$seen_dir/$1" 2>/dev/null \
-    && printf '%s\n' "$last" > "$seen_dir/$1/.joined" 2>/dev/null || true
+  { mkdir -p -- "$seen_dir/$1" && printf '%s\n' "$last" > "$seen_dir/$1/.joined"; } 2>/dev/null || true
 }
 
 # read --new, the one catch-up verb: everything since this reader's cursor, room
@@ -694,14 +693,16 @@ read_new() {
 
   for r in ${rooms[@]+"${rooms[@]}"}; do
     use_room "$r" soft || continue
-    cursor=$(cursor_get "$room" "$me")
     # A delivery with no cursor starts from the join mark, or else from now:
     # it moves the cursor past everything there and delivers none of it. A
-    # catch-up with no cursor still shows the room's whole history.
-    local from_now=0
+    # catch-up with no cursor still shows the room's whole history. The mark
+    # is read before the cursor, so a pass of the same name that writes the
+    # cursor and spends the mark in between can't leave this one with neither.
+    local from_now=0 has_mark=0 mark=
+    if [ -f "$seen_dir/$room/.joined" ]; then has_mark=1; mark=$(cursor_get "$room" .joined); fi
+    cursor=$(cursor_get "$room" "$me")
     if [ -z "$cursor" ] && [ -n "$deliver" ]; then
-      if [ -f "$seen_dir/$room/.joined" ]; then cursor=$(cursor_get "$room" .joined)
-      else from_now=1; fi
+      if [ "$has_mark" = 1 ]; then cursor=$mark; else from_now=1; fi
     fi
     local new=() picked=()
     while IFS= read -r id; do
@@ -714,6 +715,9 @@ read_new() {
       continue
     fi
     newest=${new[${#new[@]}-1]}
+    # "From now" is only as good as the cursor that records it. Where seen/
+    # can't be written, deliver as before: filenames keep repeats out.
+    if [ "$from_now" = 1 ] && ! cursor_put "$room" "$me" "$newest"; then from_now=0; fi
 
     if [ "$from_now" = 0 ]; then
       for id in "${new[@]}"; do
@@ -735,8 +739,10 @@ read_new() {
     # A room reachable read-only is a normal way to run. It still reads, the
     # pass goes on to the next room, and delivered filenames carry the room and
     # post id, so a repeat delivers nothing twice.
+    # Only a delivery spends the mark: a catch-up under another name (a
+    # session beside its heartbeat) leaves it for the heartbeat's first pass.
     if cursor_put "$room" "$me" "$newest"; then
-      rm -f -- "${seen_dir:?}/$room/.joined" 2>/dev/null
+      [ -z "$deliver" ] || rm -f -- "${seen_dir:?}/$room/.joined" 2>/dev/null || true
     else
       printf 'moot: cannot write %s (read-only room); the next --new will repeat these\n' \
         ".moot/seen/$room/$me" >&2

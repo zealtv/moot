@@ -170,21 +170,28 @@ new work. So a delivery with no cursor starts from the join mark, if the room
 has one, and otherwise from now, delivering nothing old.
 
 ```text
-.moot/seen/<room>/.joined  the room's newest post id when join or create ran
+.moot/seen/<room>/.joined  the room's newest post id when it was linked here
 ```
 
-`join` and `create` write the join mark (empty for a room with no posts yet), so
-an `@` posted between the link and the first delivery still arrives. The first
-`read --new` that writes a cursor in the room, delivering or not, removes it.
-The mark is this `.moot/`'s own state, like the cursors beside it; no name can
-begin with `.`, so it never stands for a cursor. A room linked by hand
-(`ln -s`) or copied has no mark, so its first delivery starts from now. After a
-rename (cursors are keyed by name), a delivery starts from now too, and old
-mentions don't come again.
+`join`, `create` and `dm` write the join mark (empty for a room with no posts
+yet), so an `@` posted between the link and the first delivery still arrives.
+The first delivery that writes a cursor in the room removes it; a plain
+catch-up leaves it, so a heartbeat with its own name beside a session still
+gets its first mentions. The mark is this `.moot/`'s own state, like the
+cursors beside it; no name can begin with `.`, so it never stands for a cursor.
+
+A room linked by hand (`ln -s`), made by `mkdir` or copied has no mark, so its
+first delivery starts from now; if it has no posts yet, that delivery leaves
+an empty mark, so the first post still arrives. After a rename (cursors are
+keyed by name), a delivery starts from now too, and old mentions don't come
+again. Where `seen/` can't be written, a delivery can't record "now", so it
+delivers as from the start, and filenames keep repeats out.
 
 **No path has two writers.** A post path is claimed once, by one sender, with
 `link(2)`, and never written again. A cursor path belongs to one name in one
-`.moot/`. A room holds only `posts/`, so nothing in it is mutable. Many writers
+`.moot/`. The join mark is the one exception there, and it is local: the verbs
+that link a room write it, and a first delivery under any name removes it. A
+room holds only `posts/`, so nothing in it is mutable. Many writers
 can share a room *directory*, because every post is a new path. What would
 break the rule is a shared cursor, or a mutable file inside a room.
 

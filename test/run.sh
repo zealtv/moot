@@ -682,8 +682,9 @@ refuses '--room on a room that is not here is an error' 'no room nosuch' j read 
 
 group 'a read-only room does not stop the pass'
 host=$(new_host)
+# bb has no mark, so its delivery can't record "now" and must still deliver.
 for r in aa bb cc; do
-  own "$host" "$r"
+  if [ "$r" = bb ]; then keep "$host" "$r"; else own "$host" "$r"; fi
   printf '@alice the %s thing\n' "$r" > "$host/.moot/rooms/$r/posts/20260829-100000-ben.md"
 done
 mkdir -p "$host/.moot/seen/bb"; chmod -w "$host/.moot/seen/bb"
@@ -1800,13 +1801,30 @@ check 'only the mention after the join delivers' "$(ls "$inbox")" 'moot-ops-2026
 check 'the mark never reaches the keeper' "$(ls -A "$keeper/.moot/rooms/ops")" 'posts'
 check 'join prints what it always did' "$(cd "$work" && MOOT_NAME= "$host/.moot/moot.sh" join "$keeper/.moot/rooms/ops")" 'already in rooms/ops'
 
-group 'a catch-up after a join still shows history, and spends the mark'
+group 'a catch-up after a join still shows history, and leaves the mark'
 keeper=$(new_host); keep "$keeper" ops
 printf 'the charter\n' > "$keeper/.moot/rooms/ops/posts/20260829-090000-carol.md"
 host=$(new_host)
 j join "$keeper/.moot/rooms/ops" >/dev/null
+printf '@bot please start\n' > "$keeper/.moot/rooms/ops/posts/20260829-091000-carol.md"
 case $(j read --new --as alice) in *'the charter'*) ok 'read --new shows the room from its start' ;; *) no 'read --new shows the room from its start' ;; esac
-[ -e "$host/.moot/seen/ops/.joined" ] && no 'and its cursor removes the mark' || ok 'and its cursor removes the mark'
+[ -f "$host/.moot/seen/ops/.joined" ] && ok 'a catch-up leaves the mark' || no 'a catch-up leaves the mark'
+inbox="$work/bot-inbox"; rm -rf "$inbox"
+j read --new --as bot --deliver "$inbox" >/dev/null
+check 'so a heartbeat under its own name still gets the mention' "$(ls "$inbox")" 'moot-ops-20260829-091000-carol.md'
+[ -e "$host/.moot/seen/ops/.joined" ] && no 'and its delivery spends the mark' || ok 'and its delivery spends the mark'
+
+group 'a delivery where seen/ is read-only and there is no mark'
+host=$(new_host); keep "$host" ops
+for t in 090000 090100 090200; do printf '@alice %s\n' "$t" > "$host/.moot/rooms/ops/posts/20260829-$t-ben.md"; done
+mkdir -p "$host/.moot/seen/ops"; chmod -w "$host/.moot/seen/ops"
+inbox="$work/ro-now-inbox"; rm -rf "$inbox"
+j read --new --as alice --deliver "$inbox" >/dev/null 2>"$work/ro-now.err"
+check 'it delivers as from the start, since it cannot record now' "$(ls "$inbox" | wc -l | tr -d ' ')" '3'
+j read --new --as alice --deliver "$inbox" >/dev/null 2>&1
+check 'and a repeat delivers nothing twice' "$(ls "$inbox" | wc -l | tr -d ' ')" '3'
+check 'and warns about its cursor' "$(grep -c 'read-only room' "$work/ro-now.err")" '1'
+chmod +w "$host/.moot/seen/ops"
 
 group 'create and dm leave an empty mark'
 host=$(new_host)
